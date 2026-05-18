@@ -61,6 +61,26 @@ app.whenReady().then(() => {
     callback(true);
   });
 
+  // System audio loopback for voice transcription (macOS / Windows)
+  session.defaultSession.setDisplayMediaRequestHandler(async (_request, callback) => {
+    try {
+      const sources = await desktopCapturer.getSources({ types: ['screen'] });
+      const screen = sources[0];
+      if (!screen) {
+        callback({});
+        return;
+      }
+      const useLoopback = process.platform === 'darwin' || process.platform === 'win32';
+      callback({
+        video: screen,
+        ...(useLoopback ? { audio: 'loopback' } : {}),
+      });
+    } catch (err) {
+      console.error('Display media handler failed:', err);
+      callback({});
+    }
+  }, { useSystemPicker: false });
+
   createWindow();
 
   app.on('activate', () => {

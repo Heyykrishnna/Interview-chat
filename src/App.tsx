@@ -6,6 +6,7 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 import Tesseract from 'tesseract.js';
 import Groq from 'groq-sdk';
+import { createRecordingCapture } from './audioCapture';
 
 const PANEL_W = 420;
 
@@ -74,6 +75,7 @@ export default function App() {
   const ocrIntervalRef = useRef<number | null>(null);
   const latestOcr = useRef('');
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordingCleanupRef = useRef<(() => void) | null>(null);
   const audioChunks = useRef<Blob[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -302,7 +304,8 @@ ${latestOcr.current || '(none available)'}`;
       return;
     }
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const { stream, cleanup } = await createRecordingCapture(ipc());
+      recordingCleanupRef.current = cleanup;
       const mr = new MediaRecorder(stream);
       mediaRecorderRef.current = mr;
       audioChunks.current = [];
@@ -310,7 +313,8 @@ ${latestOcr.current || '(none available)'}`;
         if (e.data.size > 0) audioChunks.current.push(e.data);
       };
       mr.onstop = async () => {
-        stream.getTracks().forEach(t => t.stop());
+        recordingCleanupRef.current?.();
+        recordingCleanupRef.current = null;
         const blob = new Blob(audioChunks.current, { type: 'audio/webm' });
         const file = new File([blob], 'audio.webm', { type: 'audio/webm' });
         setIsLoading(true);
