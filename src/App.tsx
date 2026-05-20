@@ -1,14 +1,15 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Bot, Mic, Monitor, EyeOff, Send, MicOff, Trash2,
-  ChevronDown, ChevronUp, Eye, Loader2,
+  ChevronDown, ChevronUp, Eye, Loader2, Sparkles, Zap,
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import Tesseract from 'tesseract.js';
 import Groq from 'groq-sdk';
 import { createRecordingCapture } from './audioCapture';
+import { MessageContent } from './components/MessageContent';
 
-const PANEL_W = 420;
+const PANEL_W = 440;
 
 const groq = new Groq({
   apiKey: import.meta.env.VITE_GROQ_API_KEY || '',
@@ -17,11 +18,26 @@ const groq = new Groq({
 
 type Message = { role: 'user' | 'assistant'; content: string };
 
+const WELCOME =
+  "Hey — I'm your **Interview Copilot**. Ask anything, drop a voice note, or flip on **Screen Context** so I can read what's on your display.\n\nI'll answer with crisp prose, `inline code`, and full blocks when you need implementation detail.";
+
 const DEFAULT_FOLLOW_UPS = [
   'Summarize what is on my screen',
   'Help me structure my answer',
   'What follow-up questions might they ask?',
 ];
+
+const SYSTEM_PROMPT = `You are an elite AI interview copilot — sharp, confident, and technically precise.
+
+Formatting rules (follow strictly):
+- Use **markdown** for structure: bold for emphasis, numbered lists for steps, bullet lists for options.
+- Wrap all code, commands, SQL, regex, and config in fenced blocks with the correct language tag (e.g. \`\`\`python, \`\`\`sql, \`\`\`bash).
+- Use \`inline code\` for identifiers, function names, keys, and short snippets.
+- Keep answers focused: 80–150 words unless the user asks for depth.
+- Sound like a senior engineer in a live interview — direct, no fluff.
+
+Screen context (OCR snapshot):
+`;
 
 function ipc(): { invoke: (c: string, ...a: unknown[]) => Promise<unknown>; on: (e: string, fn: () => void) => void; removeListener: (e: string, fn: () => void) => void } | null {
   try {
@@ -47,13 +63,7 @@ function parseFollowUpArray(raw: string): string[] {
 }
 
 export default function App() {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      role: 'assistant',
-      content:
-        'Hi! I am your AI Interview Copilot. Ask me anything or enable Screen Context to let me read what is on your screen.',
-    },
-  ]);
+  const [messages, setMessages] = useState<Message[]>([{ role: 'assistant', content: WELCOME }]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
@@ -134,7 +144,7 @@ export default function App() {
   const startScanning = async () => {
     const renderer = ipc();
     if (!renderer) {
-      addMsg('assistant', 'Screen capture requires the Electron app.');
+      addMsg('assistant', 'Screen capture requires the **Electron** desktop app.');
       return;
     }
     try {
@@ -150,7 +160,6 @@ export default function App() {
             minHeight: 720,
             maxHeight: 1080,
           },
-          // Electron desktopCapture — not in standard MediaTrackConstraints
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } as any,
       });
@@ -159,11 +168,11 @@ export default function App() {
         void videoRef.current.play();
       }
       setIsScanning(true);
-      setOcrStatus('Scanning…');
+      setOcrStatus('Live');
       ocrIntervalRef.current = window.setInterval(runOcr, 6000);
     } catch (err) {
       console.error(err);
-      addMsg('assistant', 'Could not start screen capture. Check permissions.');
+      addMsg('assistant', 'Could not start screen capture — check **System Settings → Privacy → Screen Recording**.');
     }
   };
 
@@ -189,12 +198,10 @@ export default function App() {
     ctx.drawImage(video, 0, 0);
     const imgData = canvas.toDataURL('image/jpeg', 0.8);
     try {
-      const {
-        data: { text },
-      } = await Tesseract.recognize(imgData, 'eng');
+      const { data: { text } } = await Tesseract.recognize(imgData, 'eng');
       if (text.trim().length > 10) {
         latestOcr.current = text.trim();
-        setOcrStatus('Context ready');
+        setOcrStatus('Synced');
       }
     } catch (e) {
       console.error('OCR error', e);
@@ -247,19 +254,14 @@ export default function App() {
       setIsLoading(true);
 
       try {
-        const systemPrompt = `You are a concise AI interview copilot. Answer clearly and directly in plain text. No markdown, no bullet points with asterisks, no bold text. Use numbered lists only when listing steps. Keep answers under 120 words unless the user asks for more.
-
-Screen context (OCR snapshot):
-${latestOcr.current || '(none available)'}`;
-
         const history = [...messages, { role: 'user' as const, content: trimmed }].slice(-12);
 
         const completion = await groq.chat.completions.create({
           model: 'llama-3.3-70b-versatile',
-          temperature: 0.25,
-          max_completion_tokens: 250,
+          temperature: 0.3,
+          max_completion_tokens: 400,
           messages: [
-            { role: 'system', content: systemPrompt },
+            { role: 'system', content: SYSTEM_PROMPT + (latestOcr.current || '(none — enable Screen Context)') },
             ...history.map(m => ({ role: m.role, content: m.content })),
           ],
         });
@@ -276,7 +278,7 @@ ${latestOcr.current || '(none available)'}`;
         }
       } catch (err) {
         console.error(err);
-        addMsg('assistant', 'Error connecting to Groq. Check your API key in .env file.');
+        addMsg('assistant', '**Connection error** — add your `VITE_GROQ_API_KEY` to `.env` and restart.');
       } finally {
         setIsLoading(false);
         setTimeout(() => inputRef.current?.focus(), 100);
@@ -288,12 +290,7 @@ ${latestOcr.current || '(none available)'}`;
   const clearChat = () => {
     followUpReq.current += 1;
     setFollowUpsLoading(false);
-    setMessages([
-      {
-        role: 'assistant',
-        content: 'Chat cleared. Ask me anything!',
-      },
-    ]);
+    setMessages([{ role: 'assistant', content: 'Fresh slate. Fire away — technical, behavioral, or system design.' }]);
     setFollowUps(DEFAULT_FOLLOW_UPS);
   };
 
@@ -323,7 +320,7 @@ ${latestOcr.current || '(none available)'}`;
           if (result.text) await sendMessage(result.text);
         } catch (err) {
           console.error(err);
-          addMsg('assistant', 'Could not transcribe audio.');
+          addMsg('assistant', 'Could not transcribe audio — try again or type your question.');
         } finally {
           setIsLoading(false);
         }
@@ -332,46 +329,71 @@ ${latestOcr.current || '(none available)'}`;
       setIsRecording(true);
     } catch (err) {
       console.error(err);
-      addMsg('assistant', 'Microphone access denied or unavailable.');
+      addMsg('assistant', 'Microphone access denied. Grant permission in **System Settings → Privacy**.');
     }
   };
 
+  if (isCollapsed) {
+    return (
+      <>
+        <div
+          className="fixed z-50 pointer-events-auto collapsed-pill flex items-center gap-2 px-4 py-2.5 rounded-full cursor-grab active:cursor-grabbing select-none"
+          style={{ left: pos.x, top: pos.y }}
+          onMouseDown={onDragStart}
+        >
+          <div className="w-7 h-7 rounded-full avatar-ring flex items-center justify-center">
+            <Sparkles className="w-3.5 h-3.5 text-indigo-300" />
+          </div>
+          <span className="text-[13px] font-semibold text-[var(--text)] tracking-tight">Copilot</span>
+          {isScanning && <span className="status-pill">{ocrStatus}</span>}
+          <button
+            type="button"
+            onClick={e => { e.stopPropagation(); setIsCollapsed(false); }}
+            className="icon-btn ml-1"
+          >
+            <ChevronDown className="w-4 h-4" />
+          </button>
+        </div>
+        <video ref={videoRef} className="hidden" muted playsInline />
+        <canvas ref={canvasRef} className="hidden" />
+      </>
+    );
+  }
+
   return (
     <>
-      <div className="fixed inset-0 pointer-events-none" />
-
-      <div className="fixed z-50 pointer-events-auto text-slate-900" style={{ left: pos.x, top: pos.y, width: PANEL_W }}>
-        <div
-          className={`flex flex-col rounded-[28px] overflow-hidden transition-opacity duration-300 ${
-            isGhost ? 'opacity-[0.18] pointer-events-none' : 'opacity-100'
-          }`}
-          style={{
-            background: '#ffffff',
-            boxShadow: '0 25px 50px -12px rgba(15, 23, 42, 0.18), 0 0 0 1px rgba(15, 23, 42, 0.06)',
-          }}
-        >
+      <div
+        className={`fixed z-50 pointer-events-auto transition-opacity duration-300 ${
+          isGhost ? 'opacity-[0.15] pointer-events-none' : 'opacity-100'
+        }`}
+        style={{ left: pos.x, top: pos.y, width: PANEL_W }}
+      >
+        <div className="copilot-panel relative flex flex-col rounded-[24px] overflow-hidden">
           {/* Title bar */}
           <div
-            className="flex items-center justify-between px-4 py-3.5 cursor-grab active:cursor-grabbing select-none shrink-0 bg-[#fafbfc] border-b border-slate-200/80"
+            className="title-bar flex items-center justify-between px-4 py-3 cursor-grab active:cursor-grabbing select-none shrink-0"
             onMouseDown={onDragStart}
           >
-            <div className="flex items-center gap-2 min-w-0">
-              <div className="w-2 h-2 rounded-full bg-[#2563eb] shrink-0" />
-              <span className="text-[15px] font-semibold text-slate-800 tracking-tight truncate">Interview Copilot</span>
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="w-8 h-8 rounded-xl avatar-ring flex items-center justify-center shrink-0">
+                <Zap className="w-4 h-4 text-indigo-300" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-[14px] font-bold text-[var(--text)] tracking-tight leading-none truncate">
+                  Interview Copilot
+                </p>
+                <p className="text-[10px] text-[var(--text-muted)] mt-0.5 font-medium">⌘⇧Space hide · ⌘⇧G ghost</p>
+              </div>
               {isScanning && (
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200/80 shrink-0">
-                  {ocrStatus}
-                </span>
+                <span className="status-pill shrink-0">{ocrStatus}</span>
               )}
             </div>
             <div className="flex items-center gap-0.5 shrink-0" onMouseDown={e => e.stopPropagation()}>
               <button
                 type="button"
                 onClick={toggleGhost}
-                title={isGhost ? 'Disable Ghost Mode (Cmd+Shift+G)' : 'Enable Ghost Mode (Cmd+Shift+G)'}
-                className={`p-2 rounded-xl transition-colors ${
-                  isGhost ? 'text-[#2563eb] bg-blue-50' : 'text-slate-400 hover:text-slate-700 hover:bg-slate-100'
-                }`}
+                title={isGhost ? 'Disable Ghost Mode (⌘⇧G)' : 'Ghost Mode — click-through (⌘⇧G)'}
+                className={`icon-btn ${isGhost ? 'icon-btn--active' : ''}`}
               >
                 {isGhost ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
               </button>
@@ -379,202 +401,167 @@ ${latestOcr.current || '(none available)'}`;
                 type="button"
                 onClick={isScanning ? stopScanning : startScanning}
                 title={isScanning ? 'Stop Screen Context' : 'Start Screen Context'}
-                className={`p-2 rounded-xl transition-colors ${
-                  isScanning ? 'text-emerald-600 bg-emerald-50' : 'text-slate-400 hover:text-slate-700 hover:bg-slate-100'
-                }`}
+                className={`icon-btn ${isScanning ? 'icon-btn--active' : ''}`}
               >
                 <Monitor className="w-4 h-4" />
               </button>
-              <button
-                type="button"
-                onClick={clearChat}
-                title="Clear chat"
-                className="p-2 rounded-xl text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors"
-              >
+              <button type="button" onClick={clearChat} title="Clear chat" className="icon-btn icon-btn--danger">
                 <Trash2 className="w-4 h-4" />
               </button>
               <button
                 type="button"
-                onClick={() => setIsCollapsed(p => !p)}
-                title={isCollapsed ? 'Expand' : 'Collapse'}
-                className="p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
+                onClick={() => setIsCollapsed(true)}
+                title="Collapse"
+                className="icon-btn"
               >
-                {isCollapsed ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
+                <ChevronUp className="w-4 h-4" />
               </button>
             </div>
           </div>
 
-          <AnimatePresence initial={false}>
-            {!isCollapsed && (
+          {/* Messages */}
+          <div
+            className="overflow-y-auto px-4 py-4 space-y-4 scrollbar-hide"
+            style={{ maxHeight: 300 }}
+          >
+            {messages.map((msg, idx) => (
               <motion.div
-                key="body"
-                initial={{ height: 0, opacity: 0 }}
-                animate={{ height: 'auto', opacity: 1 }}
-                exit={{ height: 0, opacity: 0 }}
-                transition={{ duration: 0.22, ease: 'easeInOut' }}
-                className="overflow-hidden flex flex-col"
+                key={idx}
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.2, ease: 'easeOut' }}
+                className={`flex gap-2.5 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
               >
-                <div className="overflow-y-auto px-4 py-3 space-y-3 scrollbar-hide bg-white" style={{ maxHeight: 260 }}>
-                  {messages.map((msg, idx) => (
-                    <motion.div
-                      key={idx}
-                      initial={{ opacity: 0, y: 6 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ duration: 0.18 }}
-                      className={`flex gap-2 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
-                    >
-                      {msg.role === 'assistant' && (
-                        <div className="w-8 h-8 rounded-full bg-blue-50 flex items-center justify-center shrink-0 mt-0.5 border border-blue-100">
-                          <Bot className="w-4 h-4 text-[#2563eb]" />
-                        </div>
-                      )}
-                      <div
-                        className={`max-w-[82%] rounded-2xl px-3.5 py-2.5 text-[13px] leading-relaxed ${
-                          msg.role === 'user'
-                            ? 'bg-[#2563eb] text-white rounded-tr-md shadow-sm'
-                            : 'bg-slate-100 text-slate-800 rounded-tl-md border border-slate-200/60'
-                        }`}
-                      >
-                        {msg.content}
-                      </div>
-                    </motion.div>
-                  ))}
-
-                  {isLoading && (
-                    <motion.div
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      className="flex items-center gap-2 pl-10"
-                    >
-                      <div className="flex gap-1">
-                        {[0, 1, 2].map(i => (
-                          <div
-                            key={i}
-                            className="w-1.5 h-1.5 rounded-full bg-[#2563eb]"
-                            style={{ animation: `fuBounce 0.9s ${i * 0.15}s infinite` }}
-                          />
-                        ))}
-                      </div>
-                      <span className="text-xs text-slate-400">Thinking…</span>
-                    </motion.div>
-                  )}
-
-                  <div ref={messagesEndRef} />
-                </div>
-
-                {/* Follow-up card (reference layout) */}
-                <div className="px-4 pb-3 pt-1 bg-white border-t border-slate-100" onMouseDown={e => e.stopPropagation()}>
-                  <div className="flex items-center justify-between gap-2 mb-3">
-                    <p className="text-[11px] font-medium uppercase tracking-wide text-slate-400">
-                      Most commonly asked follow-ups
-                    </p>
-                    {followUpsLoading && <Loader2 className="w-4 h-4 text-[#2563eb] animate-spin shrink-0" />}
+                {msg.role === 'assistant' && (
+                  <div className="w-8 h-8 rounded-xl avatar-ring flex items-center justify-center shrink-0 mt-0.5">
+                    <Bot className="w-4 h-4 text-indigo-300" />
                   </div>
-
-                  <div className="flex gap-3 mb-4">
-                    <div
-                      className="w-[100px] shrink-0 rounded-2xl min-h-[112px] border border-sky-100/80 overflow-hidden"
-                      style={{
-                        background: 'linear-gradient(145deg, #bae6fd 0%, #e0f2fe 45%, #cffafe 100%)',
-                        filter: 'saturate(1.05)',
-                      }}
-                      aria-hidden
-                    />
-                    <div className="flex-1 min-w-0 flex flex-col justify-center gap-2.5 py-0.5">
-                      {followUps.map((line, i) => (
-                        <button
-                          key={`${line}-${i}`}
-                          type="button"
-                          disabled={isLoading || followUpsLoading}
-                          onClick={() => void sendMessage(line)}
-                          className={`text-left rounded-xl px-0 transition-opacity disabled:opacity-45 ${
-                            i === 0 ? 'text-slate-900 font-semibold text-[14px]' : 'text-slate-500 text-[13px] font-medium'
-                          } hover:text-[#2563eb]`}
-                        >
-                          <span className="text-slate-300 font-normal">"</span>
-                          {line}
-                          <span className="text-slate-300 font-normal">"</span>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="flex gap-2.5">
-                    <button
-                      type="button"
-                      onClick={clearChat}
-                      className="flex-1 py-3 rounded-full text-[13px] font-semibold text-slate-800 bg-slate-100 hover:bg-slate-200/90 transition-colors border border-slate-200/80"
-                    >
-                      Start over
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        inputRef.current?.focus();
-                        inputRef.current?.select();
-                      }}
-                      className="flex-1 py-3 rounded-full text-[13px] font-semibold text-white bg-[#2563eb] hover:bg-[#1d4ed8] shadow-sm transition-colors"
-                    >
-                      Ask another question
-                    </button>
-                  </div>
-                </div>
-
-                <div className="px-4 pb-4 pt-2 flex items-center gap-2 bg-[#fafbfc] border-t border-slate-200/80" onMouseDown={e => e.stopPropagation()}>
-                  <button
-                    type="button"
-                    onClick={toggleRecording}
-                    title={isRecording ? 'Stop recording' : 'Record voice'}
-                    className={`shrink-0 p-2.5 rounded-full transition-all ${
-                      isRecording
-                        ? 'bg-red-50 text-red-600 ring-2 ring-red-200'
-                        : 'bg-white text-slate-500 hover:bg-slate-100 border border-slate-200'
-                    }`}
-                  >
-                    {isRecording ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
-                  </button>
-
-                  <input
-                    ref={inputRef}
-                    type="text"
-                    value={input}
-                    onChange={e => setInput(e.target.value)}
-                    onKeyDown={e => {
-                      if (e.key === 'Enter' && !e.shiftKey) {
-                        e.preventDefault();
-                        void sendMessage(input);
-                      }
-                    }}
-                    placeholder={isRecording ? 'Recording… tap mic to stop' : 'Type your question…'}
-                    disabled={isRecording || isLoading}
-                    className="flex-1 bg-white border border-slate-200 rounded-full px-4 py-2.5 text-[13px] text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#2563eb]/25 focus:border-[#2563eb] transition-all disabled:opacity-50"
-                  />
-
-                  <button
-                    type="button"
-                    onClick={() => void sendMessage(input)}
-                    disabled={!input.trim() || isLoading || isRecording}
-                    title="Send"
-                    className="shrink-0 p-2.5 bg-[#2563eb] hover:bg-[#1d4ed8] disabled:opacity-35 disabled:cursor-not-allowed rounded-full transition-colors text-white shadow-sm"
-                  >
-                    <Send className="w-4 h-4" />
-                  </button>
+                )}
+                <div
+                  className={`max-w-[85%] px-3.5 py-2.5 ${
+                    msg.role === 'user' ? 'msg-bubble--user' : 'msg-bubble--assistant'
+                  }`}
+                >
+                  <MessageContent content={msg.content} variant={msg.role} />
                 </div>
               </motion.div>
+            ))}
+
+            {isLoading && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                className="flex items-center gap-2.5 pl-10"
+              >
+                <div className="flex gap-1.5">
+                  {[0, 1, 2].map(i => (
+                    <div
+                      key={i}
+                      className="think-dot"
+                      style={{ animation: `think-bounce 0.9s ${i * 0.14}s infinite` }}
+                    />
+                  ))}
+                </div>
+                <span className="text-xs text-[var(--text-muted)] font-medium">Synthesizing…</span>
+              </motion.div>
             )}
-          </AnimatePresence>
+
+            <div ref={messagesEndRef} />
+          </div>
+
+          {/* Follow-ups */}
+          <div className="px-4 pb-3 border-t border-[var(--panel-border)]" onMouseDown={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between gap-2 py-3">
+              <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--text-muted)]">
+                Smart follow-ups
+              </p>
+              {followUpsLoading && <Loader2 className="w-3.5 h-3.5 text-indigo-400 animate-spin shrink-0" />}
+            </div>
+
+            <div className="flex gap-3 mb-3">
+              <div className="followup-card w-[88px] shrink-0 rounded-2xl min-h-[100px] flex items-center justify-center" aria-hidden>
+                <Sparkles className="w-8 h-8 text-indigo-400/60 relative z-10" />
+              </div>
+              <div className="flex-1 min-w-0 flex flex-col gap-1">
+                {followUps.map((line, i) => (
+                  <button
+                    key={`${line}-${i}`}
+                    type="button"
+                    disabled={isLoading || followUpsLoading}
+                    onClick={() => void sendMessage(line)}
+                    className={`followup-btn ${
+                      i === 0
+                        ? 'text-[var(--text)] font-semibold text-[13px]'
+                        : 'text-[var(--text-muted)] font-medium text-[12px]'
+                    }`}
+                  >
+                    <span className="text-indigo-500/50 mr-0.5">→</span>
+                    {line}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex gap-2">
+              <button type="button" onClick={clearChat} className="action-btn action-btn--secondary">
+                Start over
+              </button>
+              <button
+                type="button"
+                onClick={() => { inputRef.current?.focus(); }}
+                className="action-btn action-btn--primary"
+              >
+                Ask another
+              </button>
+            </div>
+          </div>
+
+          {/* Composer */}
+          <div
+            className="px-4 pb-4 pt-3 flex items-center gap-2 border-t border-[var(--panel-border)]"
+            style={{ background: 'linear-gradient(180deg, transparent, rgba(0,0,0,0.2))' }}
+            onMouseDown={e => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              onClick={toggleRecording}
+              title={isRecording ? 'Stop recording' : 'Voice input'}
+              className={`mic-btn shrink-0 ${isRecording ? 'mic-btn--recording' : ''}`}
+            >
+              {isRecording ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+            </button>
+
+            <input
+              ref={inputRef}
+              type="text"
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  void sendMessage(input);
+                }
+              }}
+              placeholder={isRecording ? 'Listening… tap mic to finish' : 'Ask anything — code, design, behavior…'}
+              disabled={isRecording || isLoading}
+              className="input-field flex-1 disabled:opacity-50"
+            />
+
+            <button
+              type="button"
+              onClick={() => void sendMessage(input)}
+              disabled={!input.trim() || isLoading || isRecording}
+              title="Send"
+              className="send-btn shrink-0"
+            >
+              <Send className="w-4 h-4" />
+            </button>
+          </div>
         </div>
       </div>
 
       <video ref={videoRef} className="hidden" muted playsInline />
       <canvas ref={canvasRef} className="hidden" />
-
-      <style>{`
-        @keyframes fuBounce {
-          0%, 100% { transform: translateY(0); }
-          50% { transform: translateY(-4px); }
-        }
-      `}</style>
     </>
   );
 }
