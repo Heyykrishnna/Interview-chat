@@ -3,7 +3,7 @@ import {
   Bot, Mic, Monitor, EyeOff, Send, MicOff, Trash2,
   ChevronDown, ChevronUp, Eye, Loader2, Sparkles, Zap,
 } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import Tesseract from 'tesseract.js';
 import Groq from 'groq-sdk';
 import { createRecordingCapture } from './audioCapture';
@@ -85,6 +85,7 @@ export default function App() {
   const [ocrStatus, setOcrStatus] = useState('');
   const [followUps, setFollowUps] = useState<string[]>(DEFAULT_FOLLOW_UPS);
   const [followUpsLoading, setFollowUpsLoading] = useState(false);
+  const [isFollowUpsExpanded, setIsFollowUpsExpanded] = useState(true);
 
   const [pos, setPos] = useState({ x: typeof window !== 'undefined' ? window.innerWidth - PANEL_W - 24 : 24, y: 20 });
   const dragging = useRef(false);
@@ -109,11 +110,18 @@ export default function App() {
 
   useEffect(() => {
     const renderer = ipc();
+    if (!renderer || !IS_ELECTRON) return;
+    void renderer.invoke('TOGGLE_MOUSE_EVENTS', false);
+  }, []);
+
+  useEffect(() => {
+    const renderer = ipc();
     if (!renderer) return;
     const handler = () =>
       setIsGhost(prev => {
-        renderer.invoke('TOGGLE_MOUSE_EVENTS', !prev);
-        return !prev;
+        const next = !prev;
+        void renderer.invoke('TOGGLE_MOUSE_EVENTS', next);
+        return next;
       });
     renderer.on('TOGGLE_GHOST_MODE_FROM_MAIN', handler);
     return () => renderer.removeListener('TOGGLE_GHOST_MODE_FROM_MAIN', handler);
@@ -124,9 +132,8 @@ export default function App() {
     const el = panelRef.current;
     if (!renderer || !el || !IS_ELECTRON) return;
 
-    const rect = el.getBoundingClientRect();
-    const w = Math.ceil(rect.width);
-    const h = Math.ceil(rect.height);
+    const w = Math.ceil(el.offsetWidth);
+    const h = Math.ceil(el.offsetHeight);
     if (w < 1 || h < 1) return;
 
     const current = (await renderer.invoke('GET_WINDOW_BOUNDS')) as WindowBounds;
@@ -137,7 +144,7 @@ export default function App() {
 
   useLayoutEffect(() => {
     void syncWindowBounds();
-  }, [syncWindowBounds, isCollapsed, messages.length, isLoading, followUps.length, followUpsLoading]);
+  }, [syncWindowBounds, isCollapsed, messages.length, isLoading, followUps.length, followUpsLoading, isFollowUpsExpanded]);
 
   useEffect(() => {
     const el = panelRef.current;
@@ -199,8 +206,9 @@ export default function App() {
   const toggleGhost = () => {
     const renderer = ipc();
     setIsGhost(prev => {
-      renderer?.invoke('TOGGLE_MOUSE_EVENTS', !prev);
-      return !prev;
+      const next = !prev;
+      void renderer?.invoke('TOGGLE_MOUSE_EVENTS', next);
+      return next;
     });
   };
 
@@ -397,7 +405,7 @@ export default function App() {
   };
 
   const shellStyle: React.CSSProperties = IS_ELECTRON
-    ? { left: 0, top: 0, width: PANEL_W }
+    ? { width: PANEL_W }
     : { left: pos.x, top: pos.y, width: PANEL_W };
 
   if (isCollapsed) {
@@ -405,7 +413,7 @@ export default function App() {
       <>
         <div
           ref={panelRef}
-          className="copilot-shell fixed z-50 collapsed-pill flex items-center gap-2 px-4 py-2.5 rounded-full cursor-grab active:cursor-grabbing select-none"
+          className="copilot-shell z-50 collapsed-pill flex items-center gap-2 px-4 py-2.5 rounded-full cursor-grab active:cursor-grabbing select-none"
           style={shellStyle}
           onMouseDown={onDragStart}
         >
@@ -432,7 +440,7 @@ export default function App() {
     <>
       <div
         ref={panelRef}
-        className={`copilot-shell fixed z-50 transition-opacity duration-300 ${
+        className={`copilot-shell z-50 transition-opacity duration-300 ${
           isGhost ? 'opacity-[0.15] pointer-events-none' : 'opacity-100'
         }`}
         style={shellStyle}
@@ -539,50 +547,84 @@ export default function App() {
           </div>
 
           {/* Follow-ups */}
-          <div className="px-4 pb-3 border-t border-[var(--panel-border)]" onMouseDown={e => e.stopPropagation()}>
+          <div className="px-4 border-t border-[var(--panel-border)]" onMouseDown={e => e.stopPropagation()}>
             <div className="flex items-center justify-between gap-2 py-3">
-              <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--text-muted)]">
-                Smart follow-ups
-              </p>
-              {followUpsLoading && <Loader2 className="w-3.5 h-3.5 text-indigo-400 animate-spin shrink-0" />}
-            </div>
-
-            <div className="flex gap-3 mb-3">
-              <div className="followup-card w-[88px] shrink-0 rounded-2xl min-h-[100px] flex items-center justify-center" aria-hidden>
-                <Sparkles className="w-8 h-8 text-indigo-400/60 relative z-10" />
+              <div className="flex items-center gap-2 min-w-0">
+                <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--text-muted)]">
+                  Smart follow-ups
+                </p>
+                {followUpsLoading && (
+                  <Loader2 className="w-3.5 h-3.5 text-indigo-400 animate-spin shrink-0" />
+                )}
               </div>
-              <div className="flex-1 min-w-0 flex flex-col gap-1">
-                {followUps.map((line, i) => (
-                  <button
-                    key={`${line}-${i}`}
-                    type="button"
-                    disabled={isLoading || followUpsLoading}
-                    onClick={() => void sendMessage(line)}
-                    className={`followup-btn ${
-                      i === 0
-                        ? 'text-[var(--text)] font-semibold text-[13px]'
-                        : 'text-[var(--text-muted)] font-medium text-[12px]'
-                    }`}
-                  >
-                    <span className="text-indigo-500/50 mr-0.5">→</span>
-                    {line}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="flex gap-2">
-              <button type="button" onClick={clearChat} className="action-btn action-btn--secondary">
-                Start over
-              </button>
               <button
                 type="button"
-                onClick={() => { inputRef.current?.focus(); }}
-                className="action-btn action-btn--primary"
+                onClick={() => setIsFollowUpsExpanded(prev => !prev)}
+                title={isFollowUpsExpanded ? 'Minimize follow-ups' : 'Maximize follow-ups'}
+                className="icon-btn shrink-0"
+                aria-expanded={isFollowUpsExpanded}
+                aria-label={isFollowUpsExpanded ? 'Minimize follow-ups' : 'Maximize follow-ups'}
               >
-                Ask another
+                {isFollowUpsExpanded ? (
+                  <ChevronUp className="w-4 h-4" />
+                ) : (
+                  <ChevronDown className="w-4 h-4" />
+                )}
               </button>
             </div>
+
+            <AnimatePresence initial={false}>
+              {isFollowUpsExpanded && (
+                <motion.div
+                  key="followups-body"
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: 'auto', opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{ duration: 0.22, ease: 'easeInOut' }}
+                  className="overflow-hidden pb-3"
+                >
+                  <div className="flex gap-3 mb-3">
+                    <div
+                      className="followup-card w-[88px] shrink-0 rounded-2xl min-h-[100px] flex items-center justify-center"
+                      aria-hidden
+                    >
+                      <Sparkles className="w-8 h-8 text-indigo-400/60 relative z-10" />
+                    </div>
+                    <div className="flex-1 min-w-0 flex flex-col gap-1">
+                      {followUps.map((line, i) => (
+                        <button
+                          key={`${line}-${i}`}
+                          type="button"
+                          disabled={isLoading || followUpsLoading}
+                          onClick={() => void sendMessage(line)}
+                          className={`followup-btn ${
+                            i === 0
+                              ? 'text-[var(--text)] font-semibold text-[13px]'
+                              : 'text-[var(--text-muted)] font-medium text-[12px]'
+                          }`}
+                        >
+                          <span className="text-indigo-500/50 mr-0.5">→</span>
+                          {line}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="flex gap-2">
+                    <button type="button" onClick={clearChat} className="action-btn action-btn--secondary">
+                      Start over
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { inputRef.current?.focus(); }}
+                      className="action-btn action-btn--primary"
+                    >
+                      Ask another
+                    </button>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
 
           {/* Composer */}

@@ -31,13 +31,16 @@
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-    pointer-events: none;
   }
 }
 
-/* Only the copilot panel receives clicks — rest of the window is passthrough */
+/* Electron window is sized to this element — fills the interactive area */
 .copilot-shell {
-  pointer-events: auto;
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 @layer utilities {

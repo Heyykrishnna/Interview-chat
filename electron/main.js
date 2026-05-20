@@ -38,16 +38,12 @@ function createWindow() {
     mainWindow.setContentProtection(true);
   }
 
-  // Passthrough on transparent pixels; panel stays interactive (renderer sizes window to panel)
-  mainWindow.setIgnoreMouseEvents(true, { forward: true });
+  // Window is resized to fit the panel only — full window is interactive (desktop is free outside it)
+  mainWindow.setIgnoreMouseEvents(false);
 
   // Load the Vite dev server URL or the built index.html
   // Force localhost:5555 since we are running vite concurrently in dev
   mainWindow.loadURL('http://localhost:5555');
-
-  mainWindow.webContents.on('did-finish-load', () => {
-    mainWindow.setIgnoreMouseEvents(true, { forward: true });
-  });
 
   // Keyboard shortcut to toggle UI click-through or visibility
   globalShortcut.register('CommandOrControl+Shift+Space', () => {
@@ -116,14 +112,13 @@ ipcMain.handle('GET_SOURCES', async (event, types) => {
   return sources;
 });
 
-// IPC handler to toggle ignore mouse events (ghost mode = full click-through)
-ipcMain.handle('TOGGLE_MOUSE_EVENTS', (event, ignore) => {
-  if (mainWindow) {
-    if (ignore) {
-      mainWindow.setIgnoreMouseEvents(true, { forward: true });
-    } else {
-      mainWindow.setIgnoreMouseEvents(true, { forward: true });
-    }
+// Ghost mode only: click-through. Normal mode: window matches panel and accepts all clicks.
+ipcMain.handle('TOGGLE_MOUSE_EVENTS', (_event, ghostMode) => {
+  if (!mainWindow) return;
+  if (ghostMode) {
+    mainWindow.setIgnoreMouseEvents(true, { forward: true });
+  } else {
+    mainWindow.setIgnoreMouseEvents(false);
   }
 });
 
