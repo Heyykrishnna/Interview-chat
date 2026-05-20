@@ -1,4 +1,4 @@
-import { app, BrowserWindow, globalShortcut, desktopCapturer, ipcMain, session } from 'electron';
+import { app, BrowserWindow, globalShortcut, desktopCapturer, ipcMain, session, screen } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -8,12 +8,20 @@ const __dirname = path.dirname(__filename);
 let mainWindow;
 
 function createWindow() {
+  const { width: screenW } = screen.getPrimaryDisplay().workAreaSize;
+  const initialW = 440;
+  const initialH = 520;
+
   mainWindow = new BrowserWindow({
-    width: 480,
-    height: 680,
+    width: initialW,
+    height: initialH,
+    x: screenW - initialW - 24,
+    y: 32,
     transparent: true,
     frame: false,
     alwaysOnTop: true,
+    resizable: false,
+    hasShadow: false,
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false, // For simplicity in prototyping, normally use preload
@@ -30,14 +38,16 @@ function createWindow() {
     mainWindow.setContentProtection(true);
   }
 
-  // Click-through mechanism
-  // We can make it click-through, but then the user can't interact with it.
-  // We will expose an IPC method to toggle click-through
-  mainWindow.setIgnoreMouseEvents(false);
+  // Passthrough on transparent pixels; panel stays interactive (renderer sizes window to panel)
+  mainWindow.setIgnoreMouseEvents(true, { forward: true });
 
   // Load the Vite dev server URL or the built index.html
   // Force localhost:5555 since we are running vite concurrently in dev
   mainWindow.loadURL('http://localhost:5555');
+
+  mainWindow.webContents.on('did-finish-load', () => {
+    mainWindow.setIgnoreMouseEvents(true, { forward: true });
+  });
 
   // Keyboard shortcut to toggle UI click-through or visibility
   globalShortcut.register('CommandOrControl+Shift+Space', () => {
@@ -106,13 +116,29 @@ ipcMain.handle('GET_SOURCES', async (event, types) => {
   return sources;
 });
 
-// IPC handler to toggle ignore mouse events
+// IPC handler to toggle ignore mouse events (ghost mode = full click-through)
 ipcMain.handle('TOGGLE_MOUSE_EVENTS', (event, ignore) => {
   if (mainWindow) {
     if (ignore) {
       mainWindow.setIgnoreMouseEvents(true, { forward: true });
     } else {
-      mainWindow.setIgnoreMouseEvents(false);
+      mainWindow.setIgnoreMouseEvents(true, { forward: true });
     }
   }
+});
+
+ipcMain.handle('GET_WINDOW_BOUNDS', () => {
+  if (!mainWindow) return { x: 0, y: 0, width: 440, height: 520 };
+  return mainWindow.getBounds();
+});
+
+ipcMain.handle('SET_WINDOW_BOUNDS', (_event, bounds) => {
+  if (!mainWindow || !bounds) return;
+  const { x, y, width, height } = bounds;
+  mainWindow.setBounds({
+    x: Math.round(x),
+    y: Math.round(y),
+    width: Math.max(200, Math.round(width)),
+    height: Math.max(48, Math.round(height)),
+  });
 });

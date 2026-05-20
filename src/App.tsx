@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useLayoutEffect } from 'react';
 import {
   Bot, Mic, Monitor, EyeOff, Send, MicOff, Trash2,
   ChevronDown, ChevronUp, Eye, Loader2, Sparkles, Zap,
@@ -10,6 +10,18 @@ import { createRecordingCapture } from './audioCapture';
 import { MessageContent } from './components/MessageContent';
 
 const PANEL_W = 440;
+
+type WindowBounds = { x: number; y: number; width: number; height: number };
+
+const IS_ELECTRON = (() => {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (window as any).require('electron');
+    return true;
+  } catch {
+    return false;
+  }
+})();
 
 const groq = new Groq({
   apiKey: import.meta.env.VITE_GROQ_API_KEY || '',
@@ -77,8 +89,10 @@ export default function App() {
   const [pos, setPos] = useState({ x: typeof window !== 'undefined' ? window.innerWidth - PANEL_W - 24 : 24, y: 20 });
   const dragging = useRef(false);
   const dragOffset = useRef({ x: 0, y: 0 });
+  const windowBounds = useRef<WindowBounds>({ x: 0, y: 0, width: PANEL_W, height: 520 });
   const followUpReq = useRef(0);
 
+  const panelRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -105,10 +119,47 @@ export default function App() {
     return () => renderer.removeListener('TOGGLE_GHOST_MODE_FROM_MAIN', handler);
   }, []);
 
+  const syncWindowBounds = useCallback(async () => {
+    const renderer = ipc();
+    const el = panelRef.current;
+    if (!renderer || !el || !IS_ELECTRON) return;
+
+    const rect = el.getBoundingClientRect();
+    const w = Math.ceil(rect.width);
+    const h = Math.ceil(rect.height);
+    if (w < 1 || h < 1) return;
+
+    const current = (await renderer.invoke('GET_WINDOW_BOUNDS')) as WindowBounds;
+    const next: WindowBounds = { x: current.x, y: current.y, width: w, height: h };
+    await renderer.invoke('SET_WINDOW_BOUNDS', next);
+    windowBounds.current = next;
+  }, []);
+
+  useLayoutEffect(() => {
+    void syncWindowBounds();
+  }, [syncWindowBounds, isCollapsed, messages.length, isLoading, followUps.length, followUpsLoading]);
+
+  useEffect(() => {
+    const el = panelRef.current;
+    if (!el || !IS_ELECTRON) return;
+    const ro = new ResizeObserver(() => {
+      void syncWindowBounds();
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [syncWindowBounds, isCollapsed]);
+
   const onDragStart = useCallback(
-    (e: React.MouseEvent) => {
+    async (e: React.MouseEvent) => {
       dragging.current = true;
-      dragOffset.current = { x: e.clientX - pos.x, y: e.clientY - pos.y };
+      const renderer = ipc();
+      if (renderer && IS_ELECTRON) {
+        const b = (await renderer.invoke('GET_WINDOW_BOUNDS')) as WindowBounds;
+        windowBounds.current = b;
+        dragOffset.current = { x: e.screenX - b.x, y: e.screenY - b.y };
+      } else {
+        dragOffset.current = { x: e.clientX - pos.x, y: e.clientY - pos.y };
+      }
       e.preventDefault();
     },
     [pos],
@@ -117,13 +168,25 @@ export default function App() {
   useEffect(() => {
     const onMove = (e: MouseEvent) => {
       if (!dragging.current) return;
-      setPos({
-        x: Math.max(8, Math.min(window.innerWidth - PANEL_W - 8, e.clientX - dragOffset.current.x)),
-        y: Math.max(8, Math.min(window.innerHeight - 72, e.clientY - dragOffset.current.y)),
-      });
+      const renderer = ipc();
+      if (renderer && IS_ELECTRON) {
+        const b = windowBounds.current;
+        void renderer.invoke('SET_WINDOW_BOUNDS', {
+          x: e.screenX - dragOffset.current.x,
+          y: e.screenY - dragOffset.current.y,
+          width: b.width,
+          height: b.height,
+        });
+      } else {
+        setPos({
+          x: Math.max(8, Math.min(window.innerWidth - PANEL_W - 8, e.clientX - dragOffset.current.x)),
+          y: Math.max(8, Math.min(window.innerHeight - 72, e.clientY - dragOffset.current.y)),
+        });
+      }
     };
     const onUp = () => {
       dragging.current = false;
+      void syncWindowBounds();
     };
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
@@ -131,7 +194,7 @@ export default function App() {
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
     };
-  }, []);
+  }, [syncWindowBounds]);
 
   const toggleGhost = () => {
     const renderer = ipc();
@@ -333,12 +396,17 @@ export default function App() {
     }
   };
 
+  const shellStyle: React.CSSProperties = IS_ELECTRON
+    ? { left: 0, top: 0, width: PANEL_W }
+    : { left: pos.x, top: pos.y, width: PANEL_W };
+
   if (isCollapsed) {
     return (
       <>
         <div
-          className="fixed z-50 pointer-events-auto collapsed-pill flex items-center gap-2 px-4 py-2.5 rounded-full cursor-grab active:cursor-grabbing select-none"
-          style={{ left: pos.x, top: pos.y }}
+          ref={panelRef}
+          className="copilot-shell fixed z-50 collapsed-pill flex items-center gap-2 px-4 py-2.5 rounded-full cursor-grab active:cursor-grabbing select-none"
+          style={shellStyle}
           onMouseDown={onDragStart}
         >
           <div className="w-7 h-7 rounded-full avatar-ring flex items-center justify-center">
@@ -363,10 +431,11 @@ export default function App() {
   return (
     <>
       <div
-        className={`fixed z-50 pointer-events-auto transition-opacity duration-300 ${
+        ref={panelRef}
+        className={`copilot-shell fixed z-50 transition-opacity duration-300 ${
           isGhost ? 'opacity-[0.15] pointer-events-none' : 'opacity-100'
         }`}
-        style={{ left: pos.x, top: pos.y, width: PANEL_W }}
+        style={shellStyle}
       >
         <div className="copilot-panel relative flex flex-col rounded-[24px] overflow-hidden">
           {/* Title bar */}
