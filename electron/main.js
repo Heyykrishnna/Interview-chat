@@ -106,13 +106,11 @@ app.on('will-quit', () => {
   globalShortcut.unregisterAll();
 });
 
-// IPC handler to get desktop streams for capturing
 ipcMain.handle('GET_SOURCES', async (event, types) => {
   const sources = await desktopCapturer.getSources({ types: types || ['window', 'screen'] });
   return sources;
 });
 
-// Ghost mode only: click-through. Normal mode: window matches panel and accepts all clicks.
 ipcMain.handle('TOGGLE_MOUSE_EVENTS', (_event, ghostMode) => {
   if (!mainWindow) return;
   if (ghostMode) {
