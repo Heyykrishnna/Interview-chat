@@ -24,28 +24,20 @@ function createWindow() {
     hasShadow: false,
     webPreferences: {
       nodeIntegration: true,
-      contextIsolation: false, // For simplicity in prototyping, normally use preload
+      contextIsolation: false,
     },
   });
 
-  // Make sure it floats above EVERYTHING including full-screen apps like Chrome/Zoom
   mainWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   mainWindow.setAlwaysOnTop(true, 'screen-saver', 1);
 
-  // Set the window to be ignored by screen capture (where supported)
-  // This helps hide the UI during screen sharing!
   if (process.platform === 'win32' || process.platform === 'darwin') {
     mainWindow.setContentProtection(true);
   }
 
-  // Window is resized to fit the panel only — full window is interactive (desktop is free outside it)
   mainWindow.setIgnoreMouseEvents(false);
-
-  // Load the Vite dev server URL or the built index.html
-  // Force localhost:5555 since we are running vite concurrently in dev
   mainWindow.loadURL('http://localhost:5555');
 
-  // Keyboard shortcut to toggle UI click-through or visibility
   globalShortcut.register('CommandOrControl+Shift+Space', () => {
     if (mainWindow.isVisible()) {
       mainWindow.hide();
@@ -54,31 +46,28 @@ function createWindow() {
     }
   });
 
-  // Global shortcut to toggle Ghost Mode (click-through)
   globalShortcut.register('CommandOrControl+Shift+G', () => {
     mainWindow.webContents.send('TOGGLE_GHOST_MODE_FROM_MAIN');
   });
 }
 
 app.whenReady().then(() => {
-  // Auto-allow all permissions (Microphone, etc.)
   session.defaultSession.setPermissionCheckHandler(() => true);
-  session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
+  session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => {
     callback(true);
   });
 
-  // System audio loopback for voice transcription (macOS / Windows)
   session.defaultSession.setDisplayMediaRequestHandler(async (_request, callback) => {
     try {
       const sources = await desktopCapturer.getSources({ types: ['screen'] });
-      const screen = sources[0];
-      if (!screen) {
+      const screenSource = sources[0];
+      if (!screenSource) {
         callback({});
         return;
       }
       const useLoopback = process.platform === 'darwin' || process.platform === 'win32';
       callback({
-        video: screen,
+        video: screenSource,
         ...(useLoopback ? { audio: 'loopback' } : {}),
       });
     } catch (err) {
@@ -106,7 +95,7 @@ app.on('will-quit', () => {
   globalShortcut.unregisterAll();
 });
 
-ipcMain.handle('GET_SOURCES', async (event, types) => {
+ipcMain.handle('GET_SOURCES', async (_event, types) => {
   const sources = await desktopCapturer.getSources({ types: types || ['window', 'screen'] });
   return sources;
 });

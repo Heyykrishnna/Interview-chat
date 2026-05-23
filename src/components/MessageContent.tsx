@@ -8,10 +8,8 @@ type Props = {
 };
 
 export function MessageContent({ content, variant }: Props) {
-  const isUser = variant === 'user';
-
   return (
-    <div className={`msg-prose ${isUser ? 'msg-prose--user' : 'msg-prose--assistant'}`}>
+    <div className={`msg-prose msg-prose--${variant}`}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[rehypeHighlight]}
@@ -32,8 +30,7 @@ export function MessageContent({ content, variant }: Props) {
             );
           },
           code: ({ className, children, ...props }) => {
-            const isBlock = className?.includes('language-');
-            if (isBlock) {
+            if (className?.includes('language-')) {
               return (
                 <code className={className} {...props}>
                   {children}
@@ -47,20 +44,10 @@ export function MessageContent({ content, variant }: Props) {
             );
           },
           a: ({ href, children }) => (
-            <a href={href} target="_blank" rel="noopener noreferrer" className="msg-link">
+            <a href={href} target="_blank" rel="noopener noreferrer">
               {children}
             </a>
           ),
-          ul: ({ children }) => <ul className="msg-list">{children}</ul>,
-          ol: ({ children }) => <ol className="msg-list msg-list--ordered">{children}</ol>,
-          li: ({ children }) => <li className="msg-list-item">{children}</li>,
-          p: ({ children }) => <p className="msg-paragraph">{children}</p>,
-          strong: ({ children }) => <strong className="msg-strong">{children}</strong>,
-          em: ({ children }) => <em className="msg-em">{children}</em>,
-          h1: ({ children }) => <h3 className="msg-heading">{children}</h3>,
-          h2: ({ children }) => <h3 className="msg-heading">{children}</h3>,
-          h3: ({ children }) => <h3 className="msg-heading">{children}</h3>,
-          blockquote: ({ children }) => <blockquote className="msg-quote">{children}</blockquote>,
         }}
       >
         {content}

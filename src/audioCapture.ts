@@ -1,4 +1,4 @@
-/** Capture mic + system (speaker) audio and mix for transcription. */
+import type { DesktopCaptureConstraints } from './types/electron';
 
 type IpcRenderer = {
   invoke: (channel: string, ...args: unknown[]) => Promise<unknown>;
@@ -44,9 +44,7 @@ async function getSystemAudioStream(ipcRenderer: IpcRenderer | null): Promise<Me
           maxHeight: 1,
         },
       },
-      // Electron desktopCapture — not in standard MediaTrackConstraints
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } as any);
+    } as DesktopCaptureConstraints);
     stream.getVideoTracks().forEach(t => t.stop());
     if (stream.getAudioTracks().length > 0) return stream;
     stream.getTracks().forEach(t => t.stop());
@@ -74,7 +72,6 @@ function mixStreams(mic: MediaStream, system: MediaStream): RecordingCapture {
   };
 }
 
-/** Mic + device speaker output (when Electron loopback is available). */
 export async function createRecordingCapture(ipcRenderer: IpcRenderer | null): Promise<RecordingCapture> {
   const mic = await navigator.mediaDevices.getUserMedia({
     audio: {

@@ -6,6 +6,7 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 import Tesseract from 'tesseract.js';
 import Groq from 'groq-sdk';
+import type { DesktopCaptureConstraints } from './types/electron';
 import { createRecordingCapture } from './audioCapture';
 import { MessageContent } from './components/MessageContent';
 
@@ -15,8 +16,7 @@ type WindowBounds = { x: number; y: number; width: number; height: number };
 
 const IS_ELECTRON = (() => {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (window as any).require('electron');
+    window.require?.('electron');
     return true;
   } catch {
     return false;
@@ -53,8 +53,7 @@ Screen context (OCR snapshot):
 
 function ipc(): { invoke: (c: string, ...a: unknown[]) => Promise<unknown>; on: (e: string, fn: () => void) => void; removeListener: (e: string, fn: () => void) => void } | null {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return (window as any).require('electron').ipcRenderer;
+    return window.require?.('electron')?.ipcRenderer ?? null;
   } catch {
     return null;
   }
@@ -231,9 +230,8 @@ export default function App() {
             minHeight: 720,
             maxHeight: 1080,
           },
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        } as any,
-      });
+        },
+      } as DesktopCaptureConstraints);
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         void videoRef.current.play();
@@ -446,7 +444,6 @@ export default function App() {
         style={shellStyle}
       >
         <div className="copilot-panel relative flex flex-col rounded-[24px] overflow-hidden">
-          {/* Title bar */}
           <div
             className="title-bar flex items-center justify-between px-4 py-3 cursor-grab active:cursor-grabbing select-none shrink-0"
             onMouseDown={onDragStart}
@@ -496,7 +493,6 @@ export default function App() {
             </div>
           </div>
 
-          {/* Messages */}
           <div
             className="overflow-y-auto px-4 py-4 space-y-4 scrollbar-hide"
             style={{ maxHeight: 300 }}
@@ -546,7 +542,6 @@ export default function App() {
             <div ref={messagesEndRef} />
           </div>
 
-          {/* Follow-ups */}
           <div className="px-4 border-t border-[var(--panel-border)]" onMouseDown={e => e.stopPropagation()}>
             <div className="flex items-center justify-between gap-2 py-3">
               <div className="flex items-center gap-2 min-w-0">
@@ -627,7 +622,6 @@ export default function App() {
             </AnimatePresence>
           </div>
 
-          {/* Composer */}
           <div
             className="px-4 pb-4 pt-3 flex items-center gap-2 border-t border-[var(--panel-border)]"
             style={{ background: 'linear-gradient(180deg, transparent, rgba(0,0,0,0.2))' }}
