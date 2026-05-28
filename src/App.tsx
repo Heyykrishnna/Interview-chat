@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useLayoutEffect } from 'react';
 import {
   Bot, Mic, Monitor, EyeOff, Send, MicOff, Trash2,
-  ChevronDown, ChevronUp, Eye, Loader2, Sparkles,
+  ChevronDown, ChevronUp, Eye, Loader2, Sparkles, Fan,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Tesseract from 'tesseract.js';
@@ -504,7 +504,7 @@ export default function App() {
               >
                 {msg.role === 'assistant' && (
                   <div className="w-8 h-8 rounded-xl avatar-ring flex items-center justify-center shrink-0 mt-0.5">
-                    <Bot className="w-4 h-4 text-indigo-300" />
+                    <Fan className="w-4 h-4 text-indigo-300" />
                   </div>
                 )}
                 <div
