@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useLayoutEffect } from 'react';
 import {
   Bot, Mic, Monitor, EyeOff, Send, MicOff, Trash2,
-  ChevronDown, ChevronUp, Eye, Loader2, Sparkles, Zap,
+  ChevronDown, ChevronUp, Eye, Loader2, Sparkles,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Tesseract from 'tesseract.js';
@@ -31,7 +31,7 @@ const groq = new Groq({
 type Message = { role: 'user' | 'assistant'; content: string };
 
 const WELCOME =
-  "Hey — I'm your **Interview Copilot**. Ask anything, drop a voice note, or flip on **Screen Context** so I can read what's on your display.\n\nI'll answer with crisp prose, `inline code`, and full blocks when you need implementation detail.";
+  "Your real-time AI interview assistant for coding rounds, system design, debugging, behavioral questions, and live problem solving.";
 
 const DEFAULT_FOLLOW_UPS = [
   'Summarize what is on my screen',
@@ -449,9 +449,6 @@ export default function App() {
             onMouseDown={onDragStart}
           >
             <div className="flex items-center gap-2.5 min-w-0">
-              <div className="w-8 h-8 rounded-xl avatar-ring flex items-center justify-center shrink-0">
-                <Zap className="w-4 h-4 text-indigo-300" />
-              </div>
               <div className="min-w-0">
                 <p className="text-[14px] font-bold text-[var(--text)] tracking-tight leading-none truncate">
                   Interview Copilot
@@ -543,7 +540,7 @@ export default function App() {
           </div>
 
           <div className="px-4 border-t border-[var(--panel-border)]" onMouseDown={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between gap-2 py-3">
+            <div className="flex items-center justify-between gap-2 py-2">
               <div className="flex items-center gap-2 min-w-0">
                 <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--text-muted)]">
                   Smart follow-ups
@@ -576,15 +573,9 @@ export default function App() {
                   animate={{ height: 'auto', opacity: 1 }}
                   exit={{ height: 0, opacity: 0 }}
                   transition={{ duration: 0.22, ease: 'easeInOut' }}
-                  className="overflow-hidden pb-3"
+                  className="overflow-hidden pb-2"
                 >
                   <div className="flex gap-3 mb-3">
-                    <div
-                      className="followup-card w-[88px] shrink-0 rounded-2xl min-h-[100px] flex items-center justify-center"
-                      aria-hidden
-                    >
-                      <Sparkles className="w-8 h-8 text-indigo-400/60 relative z-10" />
-                    </div>
                     <div className="flex-1 min-w-0 flex flex-col gap-1">
                       {followUps.map((line, i) => (
                         <button
