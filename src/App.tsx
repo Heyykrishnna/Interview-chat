@@ -10,9 +10,23 @@ import type { DesktopCaptureConstraints } from './types/electron';
 import { createRecordingCapture } from './audioCapture';
 import { MessageContent } from './components/MessageContent';
 
-const PANEL_W = 440;
+const PANEL_DEFAULT_W = 440;
+const PANEL_DEFAULT_H = 520;
+const PANEL_MIN_W = 300;
+const PANEL_MIN_H = 360;
+const PANEL_MAX_W = 720;
+const PANEL_MAX_H = 900;
 
 type WindowBounds = { x: number; y: number; width: number; height: number };
+type ResizeEdge = 'e' | 's' | 'se' | 'w';
+type PanelSize = { width: number; height: number };
+
+function clampPanelSize(w: number, h: number): PanelSize {
+  return {
+    width: Math.round(Math.max(PANEL_MIN_W, Math.min(PANEL_MAX_W, w))),
+    height: Math.round(Math.max(PANEL_MIN_H, Math.min(PANEL_MAX_H, h))),
+  };
+}
 
 const IS_ELECTRON = (() => {
   try {
@@ -86,10 +100,41 @@ export default function App() {
   const [followUpsLoading, setFollowUpsLoading] = useState(false);
   const [isFollowUpsExpanded, setIsFollowUpsExpanded] = useState(true);
 
-  const [pos, setPos] = useState({ x: typeof window !== 'undefined' ? window.innerWidth - PANEL_W - 24 : 24, y: 20 });
+  const [pos, setPos] = useState({
+    x: typeof window !== 'undefined' ? window.innerWidth - PANEL_DEFAULT_W - 24 : 24,
+    y: 20,
+  });
+  const [panelSize, setPanelSize] = useState<PanelSize>({
+    width: PANEL_DEFAULT_W,
+    height: PANEL_DEFAULT_H,
+  });
   const dragging = useRef(false);
   const dragOffset = useRef({ x: 0, y: 0 });
-  const windowBounds = useRef<WindowBounds>({ x: 0, y: 0, width: PANEL_W, height: 520 });
+  const resizing = useRef<{
+    active: boolean;
+    edge: ResizeEdge | null;
+    startX: number;
+    startY: number;
+    startW: number;
+    startH: number;
+    startPosX: number;
+    startBoundsX: number;
+  }>({
+    active: false,
+    edge: null,
+    startX: 0,
+    startY: 0,
+    startW: PANEL_DEFAULT_W,
+    startH: PANEL_DEFAULT_H,
+    startPosX: 0,
+    startBoundsX: 0,
+  });
+  const windowBounds = useRef<WindowBounds>({
+    x: 0,
+    y: 0,
+    width: PANEL_DEFAULT_W,
+    height: PANEL_DEFAULT_H,
+  });
   const followUpReq = useRef(0);
 
   const panelRef = useRef<HTMLDivElement>(null);
@@ -143,7 +188,7 @@ export default function App() {
 
   useLayoutEffect(() => {
     void syncWindowBounds();
-  }, [syncWindowBounds, isCollapsed, messages.length, isLoading, followUps.length, followUpsLoading, isFollowUpsExpanded]);
+  }, [syncWindowBounds, isCollapsed, panelSize.width, panelSize.height, messages.length, isLoading, followUps.length, followUpsLoading, isFollowUpsExpanded]);
 
   useEffect(() => {
     const el = panelRef.current;
@@ -157,6 +202,7 @@ export default function App() {
 
   const onDragStart = useCallback(
     async (e: React.MouseEvent) => {
+      if (resizing.current.active) return;
       dragging.current = true;
       const renderer = ipc();
       if (renderer && IS_ELECTRON) {
@@ -171,10 +217,79 @@ export default function App() {
     [pos],
   );
 
+  const onResizeStart = useCallback(
+    async (edge: ResizeEdge, e: React.MouseEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dragging.current = false;
+      const renderer = ipc();
+      let boundsX = pos.x;
+      if (renderer && IS_ELECTRON) {
+        const b = (await renderer.invoke('GET_WINDOW_BOUNDS')) as WindowBounds;
+        windowBounds.current = b;
+        boundsX = b.x;
+      }
+      resizing.current = {
+        active: true,
+        edge,
+        startX: e.screenX,
+        startY: e.screenY,
+        startW: panelSize.width,
+        startH: panelSize.height,
+        startPosX: pos.x,
+        startBoundsX: boundsX,
+      };
+    },
+    [panelSize.height, panelSize.width, pos.x],
+  );
+
   useEffect(() => {
     const onMove = (e: MouseEvent) => {
-      if (!dragging.current) return;
       const renderer = ipc();
+
+      if (resizing.current.active && resizing.current.edge) {
+        const { edge, startX, startY, startW, startH, startPosX, startBoundsX } = resizing.current;
+        const dx = e.screenX - startX;
+        const dy = e.screenY - startY;
+
+        let nextW = startW;
+        let nextH = startH;
+        let nextX = startPosX;
+        let nextBoundsX = startBoundsX;
+
+        if (edge.includes('e')) nextW = startW + dx;
+        if (edge.includes('s')) nextH = startH + dy;
+        if (edge.includes('w')) {
+          nextW = startW - dx;
+          nextBoundsX = startBoundsX + dx;
+          nextX = startPosX + dx;
+        }
+
+        const clamped = clampPanelSize(nextW, nextH);
+        if (edge.includes('w')) {
+          const appliedDx = startW - clamped.width;
+          nextBoundsX = startBoundsX + appliedDx;
+          nextX = startPosX + appliedDx;
+        }
+
+        setPanelSize(clamped);
+
+        if (renderer && IS_ELECTRON) {
+          const b = windowBounds.current;
+          void renderer.invoke('SET_WINDOW_BOUNDS', {
+            x: edge.includes('w') ? nextBoundsX : b.x,
+            y: b.y,
+            width: clamped.width,
+            height: clamped.height,
+          });
+        } else if (edge.includes('w')) {
+          setPos(prev => ({ ...prev, x: Math.max(8, nextX) }));
+        }
+        return;
+      }
+
+      if (!dragging.current) return;
+
       if (renderer && IS_ELECTRON) {
         const b = windowBounds.current;
         void renderer.invoke('SET_WINDOW_BOUNDS', {
@@ -185,13 +300,15 @@ export default function App() {
         });
       } else {
         setPos({
-          x: Math.max(8, Math.min(window.innerWidth - PANEL_W - 8, e.clientX - dragOffset.current.x)),
-          y: Math.max(8, Math.min(window.innerHeight - 72, e.clientY - dragOffset.current.y)),
+          x: Math.max(8, Math.min(window.innerWidth - panelSize.width - 8, e.clientX - dragOffset.current.x)),
+          y: Math.max(8, Math.min(window.innerHeight - panelSize.height - 8, e.clientY - dragOffset.current.y)),
         });
       }
     };
     const onUp = () => {
       dragging.current = false;
+      resizing.current.active = false;
+      resizing.current.edge = null;
       void syncWindowBounds();
     };
     window.addEventListener('mousemove', onMove);
@@ -200,7 +317,7 @@ export default function App() {
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
     };
-  }, [syncWindowBounds]);
+  }, [panelSize.height, panelSize.width, syncWindowBounds]);
 
   const toggleGhost = () => {
     const renderer = ipc();
@@ -403,8 +520,8 @@ export default function App() {
   };
 
   const shellStyle: React.CSSProperties = IS_ELECTRON
-    ? { width: PANEL_W }
-    : { left: pos.x, top: pos.y, width: PANEL_W };
+    ? { width: panelSize.width, height: panelSize.height }
+    : { left: pos.x, top: pos.y, width: panelSize.width, height: panelSize.height };
 
   if (isCollapsed) {
     return (
@@ -443,7 +560,7 @@ export default function App() {
         }`}
         style={shellStyle}
       >
-        <div className="copilot-panel relative flex flex-col rounded-[24px] overflow-hidden">
+        <div className="copilot-panel relative flex flex-col h-full rounded-[24px] overflow-hidden">
           <div
             className="title-bar flex items-center justify-between px-4 py-3 cursor-grab active:cursor-grabbing select-none shrink-0"
             onMouseDown={onDragStart}
@@ -490,10 +607,7 @@ export default function App() {
             </div>
           </div>
 
-          <div
-            className="overflow-y-auto px-4 py-4 space-y-4 scrollbar-hide"
-            style={{ maxHeight: 300 }}
-          >
+          <div className="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-4 scrollbar-hide">
             {messages.map((msg, idx) => (
               <motion.div
                 key={idx}
@@ -653,6 +767,27 @@ export default function App() {
               <Send className="w-4 h-4" />
             </button>
           </div>
+
+          <div
+            className="resize-handle resize-handle--w"
+            onMouseDown={e => void onResizeStart('w', e)}
+            aria-hidden
+          />
+          <div
+            className="resize-handle resize-handle--e"
+            onMouseDown={e => void onResizeStart('e', e)}
+            aria-hidden
+          />
+          <div
+            className="resize-handle resize-handle--s"
+            onMouseDown={e => void onResizeStart('s', e)}
+            aria-hidden
+          />
+          <div
+            className="resize-handle resize-handle--se"
+            onMouseDown={e => void onResizeStart('se', e)}
+            aria-hidden
+          />
         </div>
       </div>
 
