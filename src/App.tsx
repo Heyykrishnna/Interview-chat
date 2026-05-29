@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useLayoutEffect } from 'react';
 import {
-  Bot, Mic, Monitor, EyeOff, Send, MicOff, Trash2,
+  Mic, Monitor, EyeOff, Send, MicOff, Trash2,
   ChevronDown, ChevronUp, Eye, Loader2, Sparkles, Fan,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -16,6 +16,7 @@ const PANEL_MIN_W = 300;
 const PANEL_MIN_H = 360;
 const PANEL_MAX_W = 720;
 const PANEL_MAX_H = 900;
+const COLLAPSED_H = 48;
 
 type WindowBounds = { x: number; y: number; width: number; height: number };
 type ResizeEdge = 'e' | 's' | 'se' | 'w';
@@ -135,6 +136,10 @@ export default function App() {
     width: PANEL_DEFAULT_W,
     height: PANEL_DEFAULT_H,
   });
+  const expandedPanelSizeRef = useRef<PanelSize>({
+    width: PANEL_DEFAULT_W,
+    height: PANEL_DEFAULT_H,
+  });
   const followUpReq = useRef(0);
 
   const panelRef = useRef<HTMLDivElement>(null);
@@ -169,6 +174,22 @@ export default function App() {
       });
     renderer.on('TOGGLE_GHOST_MODE_FROM_MAIN', handler);
     return () => renderer.removeListener('TOGGLE_GHOST_MODE_FROM_MAIN', handler);
+  }, []);
+
+  useEffect(() => {
+    if (!isCollapsed) {
+      expandedPanelSizeRef.current = panelSize;
+    }
+  }, [panelSize, isCollapsed]);
+
+  const handleCollapse = useCallback(() => {
+    expandedPanelSizeRef.current = panelSize;
+    setIsCollapsed(true);
+  }, [panelSize]);
+
+  const handleExpand = useCallback(() => {
+    setPanelSize(expandedPanelSizeRef.current);
+    setIsCollapsed(false);
   }, []);
 
   const syncWindowBounds = useCallback(async () => {
@@ -519,31 +540,42 @@ export default function App() {
     }
   };
 
-  const shellStyle: React.CSSProperties = IS_ELECTRON
+  const expandedShellStyle: React.CSSProperties = IS_ELECTRON
     ? { width: panelSize.width, height: panelSize.height }
     : { left: pos.x, top: pos.y, width: panelSize.width, height: panelSize.height };
+
+  const collapsedShellStyle: React.CSSProperties = IS_ELECTRON
+    ? { width: 'max-content', height: COLLAPSED_H }
+    : { left: pos.x, top: pos.y, width: 'max-content', height: COLLAPSED_H };
 
   if (isCollapsed) {
     return (
       <>
         <div
           ref={panelRef}
-          className="copilot-shell z-50 collapsed-pill flex items-center gap-2 px-4 py-2.5 rounded-full cursor-grab active:cursor-grabbing select-none"
-          style={shellStyle}
-          onMouseDown={onDragStart}
+          className="copilot-shell copilot-shell--collapsed z-50"
+          style={collapsedShellStyle}
         >
-          <div className="w-7 h-7 rounded-full avatar-ring flex items-center justify-center">
-            <Sparkles className="w-3.5 h-3.5 text-indigo-300" />
-          </div>
-          <span className="text-[13px] font-semibold text-[var(--text)] tracking-tight">Copilot</span>
-          {isScanning && <span className="status-pill">{ocrStatus}</span>}
-          <button
-            type="button"
-            onClick={e => { e.stopPropagation(); setIsCollapsed(false); }}
-            className="icon-btn ml-1"
+          <div
+            className="collapsed-bar flex items-center gap-2 px-3.5 h-full cursor-grab active:cursor-grabbing select-none"
+            onMouseDown={onDragStart}
           >
-            <ChevronDown className="w-4 h-4" />
-          </button>
+            <div className="w-7 h-7 rounded-lg avatar-ring flex items-center justify-center shrink-0">
+              <Sparkles className="w-3.5 h-3.5 text-indigo-300" />
+            </div>
+            <span className="text-[13px] font-semibold text-[var(--text)] tracking-tight whitespace-nowrap">
+              Copilot
+            </span>
+            {isScanning && <span className="status-pill shrink-0">{ocrStatus}</span>}
+            <button
+              type="button"
+              onClick={e => { e.stopPropagation(); handleExpand(); }}
+              className="icon-btn ml-0.5 shrink-0"
+              title="Expand"
+            >
+              <ChevronDown className="w-4 h-4" />
+            </button>
+          </div>
         </div>
         <video ref={videoRef} className="hidden" muted playsInline />
         <canvas ref={canvasRef} className="hidden" />
@@ -558,7 +590,7 @@ export default function App() {
         className={`copilot-shell z-50 transition-opacity duration-300 ${
           isGhost ? 'opacity-[0.15] pointer-events-none' : 'opacity-100'
         }`}
-        style={shellStyle}
+        style={expandedShellStyle}
       >
         <div className="copilot-panel relative flex flex-col h-full rounded-[24px] overflow-hidden">
           <div
@@ -598,7 +630,7 @@ export default function App() {
               </button>
               <button
                 type="button"
-                onClick={() => setIsCollapsed(true)}
+                onClick={handleCollapse}
                 title="Collapse"
                 className="icon-btn"
               >
