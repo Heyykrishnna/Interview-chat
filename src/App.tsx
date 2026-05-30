@@ -561,7 +561,7 @@ export default function App() {
             onMouseDown={onDragStart}
           >
             <div className="w-7 h-7 rounded-lg avatar-ring flex items-center justify-center shrink-0">
-              <Sparkles className="w-3.5 h-3.5 text-indigo-300" />
+              <Sparkles className="w-3.5 h-3.5 text-blue-300" />
             </div>
             <span className="text-[13px] font-semibold text-[var(--text)] tracking-tight whitespace-nowrap">
               Copilot
@@ -650,7 +650,7 @@ export default function App() {
               >
                 {msg.role === 'assistant' && (
                   <div className="w-8 h-8 rounded-xl avatar-ring flex items-center justify-center shrink-0 mt-0.5">
-                    <Fan className="w-4 h-4 text-indigo-300" />
+                    <Fan className="w-4 h-4 text-blue-300" />
                   </div>
                 )}
                 <div
@@ -692,7 +692,7 @@ export default function App() {
                   Smart follow-ups
                 </p>
                 {followUpsLoading && (
-                  <Loader2 className="w-3.5 h-3.5 text-indigo-400 animate-spin shrink-0" />
+                  <Loader2 className="w-3.5 h-3.5 text-blue-400 animate-spin shrink-0" />
                 )}
               </div>
               <button
@@ -735,7 +735,7 @@ export default function App() {
                               : 'text-[var(--text-muted)] font-medium text-[12px]'
                           }`}
                         >
-                          <span className="text-indigo-500/50 mr-0.5">→</span>
+                          <span className="text-blue-400/60 mr-0.5">→</span>
                           {line}
                         </button>
                       ))}
@@ -760,8 +760,7 @@ export default function App() {
           </div>
 
           <div
-            className="px-4 pb-4 pt-3 flex items-center gap-2 border-t border-[var(--panel-border)]"
-            style={{ background: 'linear-gradient(180deg, transparent, rgba(0,0,0,0.2))' }}
+            className="px-4 pb-4 pt-3 flex items-center gap-2 border-t border-[var(--panel-border)] bg-[#0f172a]"
             onMouseDown={e => e.stopPropagation()}
           >
             <button
