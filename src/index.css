@@ -42,6 +42,7 @@
   top: 0;
   width: 100%;
   box-sizing: border-box;
+  overflow: visible;
 }
 
 @layer utilities {
@@ -57,11 +58,12 @@
 
 .copilot-panel {
   background: var(--panel-bg);
-  backdrop-filter: var(--backdrop-filter, blur(20px) saturate(1.2));
-  -webkit-backdrop-filter: var(--backdrop-filter, blur(20px) saturate(1.2));
+  backdrop-filter: var(--backdrop-filter, blur(20px) saturate(1.2)) !important;
+  -webkit-backdrop-filter: var(--backdrop-filter, blur(20px) saturate(1.2)) !important;
   border: 1px solid var(--panel-border);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
-  border-radius: var(--panel-radius, 24px) !important;
+  border-radius: var(--panel-radius, 24px);
+  font-family: var(--font-sans);
 }
 
 .title-bar {
@@ -453,11 +455,12 @@
 
 .collapsed-bar {
   background: var(--panel-bg);
-  backdrop-filter: blur(16px) saturate(1.2);
-  -webkit-backdrop-filter: blur(16px) saturate(1.2);
+  backdrop-filter: var(--backdrop-filter, blur(16px) saturate(1.2)) !important;
+  -webkit-backdrop-filter: var(--backdrop-filter, blur(16px) saturate(1.2)) !important;
   border: 1px solid var(--panel-border);
-  border-radius: 12px;
+  border-radius: var(--panel-radius, 12px);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  font-family: var(--font-sans);
 }
 
 .copilot-shell--collapsed {
@@ -532,23 +535,24 @@
 }
 
 .settings-panel {
-  position: absolute;
-  top: 52px;
-  right: 8px;
-  width: 310px;
-  max-height: calc(100% - 68px);
-  background: rgba(10, 14, 28, 0.97);
-  backdrop-filter: blur(28px) saturate(1.4);
-  -webkit-backdrop-filter: blur(28px) saturate(1.4);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  position: fixed;
+  /* positioned relative to top-right of viewport — adjusted by JS if needed */
+  top: 60px;
+  right: 16px;
+  width: 315px;
+  max-height: calc(100vh - 80px);
+  background: rgba(8, 11, 22, 0.98);
+  backdrop-filter: blur(32px) saturate(1.6) !important;
+  -webkit-backdrop-filter: blur(32px) saturate(1.6) !important;
+  border: 1px solid rgba(255, 255, 255, 0.13);
   border-radius: 20px;
   box-shadow:
-    0 20px 60px rgba(0, 0, 0, 0.5),
-    0 1px 0 rgba(255, 255, 255, 0.06) inset;
+    0 24px 64px rgba(0, 0, 0, 0.6),
+    0 1px 0 rgba(255, 255, 255, 0.07) inset;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  z-index: 100;
+  z-index: 9999;
   color: var(--text);
   font-family: var(--font-sans);
 }

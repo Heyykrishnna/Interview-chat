@@ -78,7 +78,10 @@ export function applySettings(s: AppSettings) {
 
   const accentRgb = hexToRgb(s.accentColor);
   const root = document.documentElement;
+  const blurVal = `blur(${s.blurStrength}px) saturate(1.2)`;
+  const radiusMap = { sharp: '8px', normal: '16px', round: '24px' } as const;
 
+  // ── CSS Variables ─────────────────────────────────────────
   root.style.setProperty('--panel-bg',        `rgba(${r},${g},${b},${opacity})`);
   root.style.setProperty('--title-bar-bg',    `rgba(${r},${g},${b},${Math.max(0.05, opacity - 0.25)})`);
   root.style.setProperty('--panel-border',    `rgba(255,255,255,${0.06 + opacity * 0.06})`);
@@ -89,9 +92,28 @@ export function applySettings(s: AppSettings) {
   root.style.setProperty('--user-bubble',     s.accentColor);
   root.style.setProperty('--font-sans',       font.stack);
   root.style.setProperty('--font-size-base',  `${s.fontSize}px`);
-  root.style.setProperty('--panel-radius',    { sharp: '8px', normal: '16px', round: '24px' }[s.roundness]);
+  root.style.setProperty('--panel-radius',    radiusMap[s.roundness]);
   root.style.setProperty('--msg-spacing',     { compact: '10px', normal: '16px', relaxed: '22px' }[s.messageSpacing]);
-  root.style.setProperty('--backdrop-filter', `blur(${s.blurStrength}px) saturate(1.2)`);
+  root.style.setProperty('--backdrop-filter', blurVal);
+
+  // ── Direct DOM overrides (vars alone not enough in some contexts) ──
+  // Font family — force onto body so all elements inherit it
+  document.body.style.fontFamily = font.stack;
+
+  // Blur — force directly onto every .copilot-panel element
+  document.querySelectorAll<HTMLElement>('.copilot-panel').forEach(el => {
+    el.style.backdropFilter = blurVal;
+    (el.style as unknown as Record<string,string>)['-webkit-backdrop-filter'] = blurVal;
+    el.style.background = `rgba(${r},${g},${b},${opacity})`;
+    el.style.borderRadius = radiusMap[s.roundness];
+  });
+
+  // Border-radius — also force collapsed bar
+  document.querySelectorAll<HTMLElement>('.collapsed-bar').forEach(el => {
+    el.style.backdropFilter = blurVal;
+    (el.style as unknown as Record<string,string>)['-webkit-backdrop-filter'] = blurVal;
+    el.style.background = `rgba(${r},${g},${b},${opacity})`;
+  });
 }
 
 function hexToRgb(hex: string): string | null {

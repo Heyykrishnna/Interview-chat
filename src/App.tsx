@@ -619,7 +619,7 @@ export default function App() {
         }`}
         style={expandedShellStyle}
       >
-        <div className="copilot-panel relative flex flex-col h-full rounded-[24px] overflow-hidden">
+        <div className="copilot-panel relative flex flex-col h-full" style={{ overflow: 'hidden' }}>
           <div
             className="title-bar flex items-center justify-between px-4 py-3 cursor-grab active:cursor-grabbing select-none shrink-0"
             onMouseDown={onDragStart}
@@ -673,17 +673,6 @@ export default function App() {
               </button>
             </div>
           </div>
-
-          {/* Settings Panel */}
-          <SettingsPanel
-            open={isSettingsOpen}
-            settings={settings}
-            activeSection={activeSettingsSection}
-            onSectionChange={setActiveSettingsSection}
-            onClose={() => setIsSettingsOpen(false)}
-            onChange={handleSettingsChange}
-            onReset={handleSettingsReset}
-          />
 
           <div
             className="flex-1 min-h-0 overflow-y-auto px-4 scrollbar-hide"
@@ -876,6 +865,18 @@ export default function App() {
             aria-hidden
           />
         </div>
+
+        {/* Settings Panel — outside overflow:hidden so it renders freely */}
+        <SettingsPanel
+          open={isSettingsOpen}
+          settings={settings}
+          activeSection={activeSettingsSection}
+          onSectionChange={setActiveSettingsSection}
+          onClose={() => setIsSettingsOpen(false)}
+          onChange={handleSettingsChange}
+          onReset={handleSettingsReset}
+        />
+
       </div>
 
       <video ref={videoRef} className="hidden" muted playsInline />
