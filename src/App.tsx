@@ -760,7 +760,7 @@ export default function App() {
           </div>
 
           <div
-            className="px-4 pb-4 pt-3 flex items-center gap-2 border-t border-[var(--panel-border)] bg-[#0f172a]"
+            className="composer-bar px-4 pb-4 pt-3 flex items-center gap-2 border-t border-[var(--panel-border)]"
             onMouseDown={e => e.stopPropagation()}
           >
             <button

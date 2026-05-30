@@ -2,18 +2,20 @@
 @import "highlight.js/styles/github-dark.min.css";
 
 :root {
-  --panel-bg: #1e293b;
-  --panel-border: #334155;
+  --panel-bg: rgba(15, 23, 42, 0.72);
+  --title-bar-bg: rgba(15, 23, 42, 0.45);
+  --panel-border: rgba(255, 255, 255, 0.1);
   --accent: #2563eb;
   --accent-hover: #1d4ed8;
   --accent-muted: rgba(37, 99, 235, 0.15);
   --accent-2: #3b82f6;
   --text: #f1f5f9;
   --text-muted: #94a3b8;
-  --surface: #334155;
-  --surface-hover: #475569;
+  --surface: rgba(255, 255, 255, 0.06);
+  --surface-hover: rgba(255, 255, 255, 0.1);
   --user-bubble: #2563eb;
-  --assistant-bubble: #334155;
+  --assistant-bubble: rgba(255, 255, 255, 0.08);
+  --input-bg: rgba(0, 0, 0, 0.25);
   --font-sans: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
   --font-mono: "JetBrains Mono", "Fira Code", ui-monospace, monospace;
 }
@@ -53,13 +55,19 @@
 
 .copilot-panel {
   background: var(--panel-bg);
+  backdrop-filter: blur(20px) saturate(1.2);
+  -webkit-backdrop-filter: blur(20px) saturate(1.2);
   border: 1px solid var(--panel-border);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
 }
 
 .title-bar {
-  background: #0f172a;
+  background: var(--title-bar-bg);
   border-bottom: 1px solid var(--panel-border);
+}
+
+.composer-bar {
+  background: var(--title-bar-bg);
 }
 
 .status-pill {
@@ -209,7 +217,7 @@
   font-size: 0.88em;
   padding: 0.15em 0.45em;
   border-radius: 6px;
-  background: #0f172a;
+  background: rgba(0, 0, 0, 0.3);
   border: 1px solid var(--panel-border);
   color: #93c5fd;
 }
@@ -311,7 +319,7 @@
 }
 
 .input-field {
-  background: #0f172a;
+  background: var(--input-bg);
   border: 1px solid var(--panel-border);
   color: var(--text);
   font-size: 13px;
@@ -417,6 +425,8 @@
 
 .collapsed-bar {
   background: var(--panel-bg);
+  backdrop-filter: blur(16px) saturate(1.2);
+  -webkit-backdrop-filter: blur(16px) saturate(1.2);
   border: 1px solid var(--panel-border);
   border-radius: 12px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
