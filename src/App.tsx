@@ -112,8 +112,8 @@ export default function App() {
   const [activeSettingsSection, setActiveSettingsSection] = useState<'appearance' | 'typography' | 'layout' | 'advanced'>('appearance');
   const [settings, setSettings] = useState<AppSettings>(() => loadSettings());
 
-  // Apply settings on mount and on every change
-  useEffect(() => {
+  // Apply settings before every paint (useLayoutEffect avoids flicker)
+  useLayoutEffect(() => {
     applySettings(settings);
     saveSettings(settings);
   }, [settings]);
@@ -676,57 +676,66 @@ export default function App() {
 
           <div
             className="flex-1 min-h-0 overflow-y-auto px-4 scrollbar-hide"
-            style={{ paddingTop: settings.compactMode ? 8 : 16, paddingBottom: settings.compactMode ? 8 : 16 }}
+            style={{
+              paddingTop: settings.compactMode ? 8 : 16,
+              paddingBottom: settings.compactMode ? 8 : 16,
+            }}
           >
-            <div style={{ display: 'flex', flexDirection: 'column', gap: settings.messageSpacing === 'compact' ? 8 : settings.messageSpacing === 'relaxed' ? 20 : 14 }}>
-            {messages.map((msg, idx) => (
-              <motion.div
-                key={idx}
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.2, ease: 'easeOut' }}
-                className={`flex gap-2.5 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
-              >
-                {msg.role === 'assistant' && settings.showAvatars && (
-                  <div className="w-8 h-8 rounded-xl avatar-ring flex items-center justify-center shrink-0 mt-0.5">
-                    <Fan className="w-4 h-4 text-blue-300" />
-                  </div>
-                )}
-                <div
-                  className={`max-w-[85%] px-3.5 py-2.5 ${
-                    msg.role === 'user' ? 'msg-bubble--user' : 'msg-bubble--assistant'
-                  } ${!settings.showAvatars && msg.role === 'assistant' ? 'ml-0' : ''}`}
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: settings.messageSpacing === 'compact' ? 8 : settings.messageSpacing === 'relaxed' ? 20 : 14,
+              }}
+            >
+              {messages.map((msg, idx) => (
+                <motion.div
+                  key={idx}
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.2, ease: 'easeOut' }}
+                  className={`flex gap-2.5 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
                 >
-                  <MessageContent content={msg.content} variant={msg.role} />
-                  {settings.showTimestamps && (
-                    <p style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 4, opacity: 0.6 }}>
-                      {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                    </p>
+                  {msg.role === 'assistant' && settings.showAvatars && (
+                    <div className="w-8 h-8 rounded-xl avatar-ring flex items-center justify-center shrink-0 mt-0.5">
+                      <Fan className="w-4 h-4 text-blue-300" />
+                    </div>
                   )}
-                </div>
-              </motion.div>
-            ))}
+                  <div
+                    className={`max-w-[85%] px-3.5 py-2.5 ${
+                      msg.role === 'user' ? 'msg-bubble--user' : 'msg-bubble--assistant'
+                    }`}
+                  >
+                    <MessageContent content={msg.content} variant={msg.role} />
+                    {settings.showTimestamps && (
+                      <p style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 4, opacity: 0.6 }}>
+                        {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </p>
+                    )}
+                  </div>
+                </motion.div>
+              ))}
 
-            {isLoading && (
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                className={`flex items-center gap-2.5 ${settings.showAvatars ? 'pl-10' : 'pl-0'}`}
-              >
-                <div className="flex gap-1.5">
-                  {[0, 1, 2].map(i => (
-                    <div
-                      key={i}
-                      className="think-dot"
-                      style={{ animation: `think-bounce 0.9s ${i * 0.14}s infinite` }}
-                    />
-                  ))}
-                </div>
-                <span className="text-xs text-[var(--text-muted)] font-medium">Synthesizing…</span>
-              </motion.div>
-            )}
+              {isLoading && (
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  className={`flex items-center gap-2.5 ${settings.showAvatars ? 'pl-10' : 'pl-0'}`}
+                >
+                  <div className="flex gap-1.5">
+                    {[0, 1, 2].map(i => (
+                      <div
+                        key={i}
+                        className="think-dot"
+                        style={{ animation: `think-bounce 0.9s ${i * 0.14}s infinite` }}
+                      />
+                    ))}
+                  </div>
+                  <span className="text-xs text-[var(--text-muted)] font-medium">Synthesizing…</span>
+                </motion.div>
+              )}
 
-            <div ref={messagesEndRef} />
+              <div ref={messagesEndRef} />
             </div>
           </div>
 

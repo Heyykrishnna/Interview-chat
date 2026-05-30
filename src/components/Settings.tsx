@@ -97,22 +97,28 @@ export function applySettings(s: AppSettings) {
   root.style.setProperty('--backdrop-filter', blurVal);
 
   // ── Direct DOM overrides (vars alone not enough in some contexts) ──
-  // Font family — force onto body so all elements inherit it
+  // Font family — force onto body so all elements inherit it immediately
   document.body.style.fontFamily = font.stack;
+  document.documentElement.style.fontFamily = font.stack;
 
-  // Blur — force directly onto every .copilot-panel element
-  document.querySelectorAll<HTMLElement>('.copilot-panel').forEach(el => {
-    el.style.backdropFilter = blurVal;
-    (el.style as unknown as Record<string,string>)['-webkit-backdrop-filter'] = blurVal;
-    el.style.background = `rgba(${r},${g},${b},${opacity})`;
-    el.style.borderRadius = radiusMap[s.roundness];
-  });
-
-  // Border-radius — also force collapsed bar
-  document.querySelectorAll<HTMLElement>('.collapsed-bar').forEach(el => {
-    el.style.backdropFilter = blurVal;
-    (el.style as unknown as Record<string,string>)['-webkit-backdrop-filter'] = blurVal;
-    el.style.background = `rgba(${r},${g},${b},${opacity})`;
+  // Blur & radius — force directly onto panel elements after next paint
+  // (rAF ensures elements exist in DOM when we query them)
+  requestAnimationFrame(() => {
+    const applyToEl = (el: HTMLElement) => {
+      el.style.backdropFilter = blurVal;
+      (el.style as unknown as Record<string, string>)['-webkit-backdrop-filter'] = blurVal;
+      el.style.background = `rgba(${r},${g},${b},${opacity})`;
+      el.style.borderRadius = radiusMap[s.roundness];
+      el.style.fontFamily = font.stack;
+    };
+    document.querySelectorAll<HTMLElement>('.copilot-panel').forEach(applyToEl);
+    document.querySelectorAll<HTMLElement>('.collapsed-bar').forEach(el => {
+      el.style.backdropFilter = blurVal;
+      (el.style as unknown as Record<string, string>)['-webkit-backdrop-filter'] = blurVal;
+      el.style.background = `rgba(${r},${g},${b},${opacity})`;
+      el.style.borderRadius = radiusMap[s.roundness];
+      el.style.fontFamily = font.stack;
+    });
   });
 }
 
