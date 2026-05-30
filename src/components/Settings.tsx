@@ -395,10 +395,7 @@ export function SettingsPanel({
                 <SettingsGroup label="About">
                   <div className="about-card">
                     {[
-                      { k: 'Version',  v: '1.0.0' },
-                      { k: 'Engine',   v: 'Groq · LLaMA 3.3 70B' },
-                      { k: 'OCR',      v: 'Tesseract.js' },
-                      { k: 'Platform', v: 'Electron + React' },
+                      { k: 'Version',  v: '1.1.2' },
                     ].map(row => (
                       <div key={row.k} className="about-row">
                         <span className="about-key">{row.k}</span>
