@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useLayoutEffect } from 'react';
 import {
   Mic, Monitor, EyeOff, Send, MicOff, Trash2,
-  ChevronDown, ChevronUp, Eye, Loader2, Sparkles, Fan,
+  ChevronDown, ChevronUp, Eye, Loader2, Sparkles, Fan, Settings,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Tesseract from 'tesseract.js';
@@ -9,6 +9,14 @@ import Groq from 'groq-sdk';
 import type { DesktopCaptureConstraints } from './types/electron';
 import { createRecordingCapture } from './audioCapture';
 import { MessageContent } from './components/MessageContent';
+import {
+  SettingsPanel,
+  loadSettings,
+  saveSettings,
+  applySettings,
+  DEFAULT_SETTINGS,
+} from './components/Settings';
+import type { AppSettings } from './components/Settings';
 
 const PANEL_DEFAULT_W = 440;
 const PANEL_DEFAULT_H = 520;
@@ -100,6 +108,25 @@ export default function App() {
   const [followUps, setFollowUps] = useState<string[]>(DEFAULT_FOLLOW_UPS);
   const [followUpsLoading, setFollowUpsLoading] = useState(false);
   const [isFollowUpsExpanded, setIsFollowUpsExpanded] = useState(true);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [activeSettingsSection, setActiveSettingsSection] = useState<'appearance' | 'typography' | 'layout' | 'advanced'>('appearance');
+  const [settings, setSettings] = useState<AppSettings>(() => loadSettings());
+
+  // Apply settings on mount and on every change
+  useEffect(() => {
+    applySettings(settings);
+    saveSettings(settings);
+  }, [settings]);
+
+  const handleSettingsChange = useCallback((next: AppSettings) => {
+    setSettings(next);
+  }, []);
+
+  const handleSettingsReset = useCallback(() => {
+    setSettings(DEFAULT_SETTINGS);
+  }, []);
+
+  // Close settings on Escape handled inside SettingsPanel
 
   const [pos, setPos] = useState({
     x: typeof window !== 'undefined' ? window.innerWidth - PANEL_DEFAULT_W - 24 : 24,
@@ -630,6 +657,14 @@ export default function App() {
               </button>
               <button
                 type="button"
+                onClick={() => { setIsSettingsOpen(prev => !prev); setActiveSettingsSection('appearance'); }}
+                title="Settings"
+                className={`icon-btn ${isSettingsOpen ? 'icon-btn--active' : ''}`}
+              >
+                <Settings className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
                 onClick={handleCollapse}
                 title="Collapse"
                 className="icon-btn"
@@ -639,7 +674,22 @@ export default function App() {
             </div>
           </div>
 
-          <div className="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-4 scrollbar-hide">
+          {/* Settings Panel */}
+          <SettingsPanel
+            open={isSettingsOpen}
+            settings={settings}
+            activeSection={activeSettingsSection}
+            onSectionChange={setActiveSettingsSection}
+            onClose={() => setIsSettingsOpen(false)}
+            onChange={handleSettingsChange}
+            onReset={handleSettingsReset}
+          />
+
+          <div
+            className="flex-1 min-h-0 overflow-y-auto px-4 scrollbar-hide"
+            style={{ paddingTop: settings.compactMode ? 8 : 16, paddingBottom: settings.compactMode ? 8 : 16 }}
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', gap: settings.messageSpacing === 'compact' ? 8 : settings.messageSpacing === 'relaxed' ? 20 : 14 }}>
             {messages.map((msg, idx) => (
               <motion.div
                 key={idx}
@@ -648,7 +698,7 @@ export default function App() {
                 transition={{ duration: 0.2, ease: 'easeOut' }}
                 className={`flex gap-2.5 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
               >
-                {msg.role === 'assistant' && (
+                {msg.role === 'assistant' && settings.showAvatars && (
                   <div className="w-8 h-8 rounded-xl avatar-ring flex items-center justify-center shrink-0 mt-0.5">
                     <Fan className="w-4 h-4 text-blue-300" />
                   </div>
@@ -656,9 +706,14 @@ export default function App() {
                 <div
                   className={`max-w-[85%] px-3.5 py-2.5 ${
                     msg.role === 'user' ? 'msg-bubble--user' : 'msg-bubble--assistant'
-                  }`}
+                  } ${!settings.showAvatars && msg.role === 'assistant' ? 'ml-0' : ''}`}
                 >
                   <MessageContent content={msg.content} variant={msg.role} />
+                  {settings.showTimestamps && (
+                    <p style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 4, opacity: 0.6 }}>
+                      {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </p>
+                  )}
                 </div>
               </motion.div>
             ))}
@@ -667,7 +722,7 @@ export default function App() {
               <motion.div
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
-                className="flex items-center gap-2.5 pl-10"
+                className={`flex items-center gap-2.5 ${settings.showAvatars ? 'pl-10' : 'pl-0'}`}
               >
                 <div className="flex gap-1.5">
                   {[0, 1, 2].map(i => (
@@ -683,6 +738,7 @@ export default function App() {
             )}
 
             <div ref={messagesEndRef} />
+            </div>
           </div>
 
           <div className="px-4 border-t border-[var(--panel-border)]" onMouseDown={e => e.stopPropagation()}>
