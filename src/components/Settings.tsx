@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { X, Palette, Type, Layout, Sliders, RotateCcw } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 export type Theme =
   | 'dark-blue'
@@ -13,12 +14,13 @@ export type Theme =
   | 'amber';
 
 export type FontFamily = 'plus-jakarta' | 'inter' | 'outfit' | 'geist' | 'mono';
+export type Section = 'appearance' | 'typography' | 'layout' | 'advanced';
 
 export interface AppSettings {
   theme: Theme;
-  bgOpacity: number;
-  blurStrength: number;
-  fontSize: number;
+  bgOpacity: number;        // 0–1 (0 = fully transparent)
+  blurStrength: number;     // 0–40 px
+  fontSize: number;         // 11–18 px
   fontFamily: FontFamily;
   messageSpacing: 'compact' | 'normal' | 'relaxed';
   showTimestamps: boolean;
@@ -42,62 +44,54 @@ export const DEFAULT_SETTINGS: AppSettings = {
   accentColor: '#2563eb',
 };
 
+// ─── Theme & Font Definitions ─────────────────────────────────────────────────
 
 const THEMES: { id: Theme; label: string; bg: string; accent: string; dot: string }[] = [
-  { id: 'dark-blue', label: 'Ocean', bg: 'rgba(15,23,42,0.9)', accent: '#2563eb', dot: '#3b82f6' },
-  { id: 'dark-purple', label: 'Violet', bg: 'rgba(20,10,40,0.9)', accent: '#7c3aed', dot: '#a78bfa' },
-  { id: 'dark-slate', label: 'Slate', bg: 'rgba(18,22,30,0.9)', accent: '#0891b2', dot: '#22d3ee' },
-  { id: 'midnight', label: 'Midnight', bg: 'rgba(8,10,18,0.9)', accent: '#6366f1', dot: '#818cf8' },
-  { id: 'forest', label: 'Forest', bg: 'rgba(10,22,15,0.9)', accent: '#059669', dot: '#34d399' },
-  { id: 'rose', label: 'Rose', bg: 'rgba(25,10,15,0.9)', accent: '#e11d48', dot: '#fb7185' },
-  { id: 'amber', label: 'Amber', bg: 'rgba(22,16,5,0.9)', accent: '#d97706', dot: '#fbbf24' },
+  { id: 'dark-blue',   label: 'Ocean',    bg: 'rgba(15,23,42,0.9)',   accent: '#2563eb', dot: '#3b82f6' },
+  { id: 'dark-purple', label: 'Violet',   bg: 'rgba(20,10,40,0.9)',   accent: '#7c3aed', dot: '#a78bfa' },
+  { id: 'dark-slate',  label: 'Slate',    bg: 'rgba(18,22,30,0.9)',   accent: '#0891b2', dot: '#22d3ee' },
+  { id: 'midnight',    label: 'Midnight', bg: 'rgba(8,10,18,0.9)',    accent: '#6366f1', dot: '#818cf8' },
+  { id: 'forest',      label: 'Forest',   bg: 'rgba(10,22,15,0.9)',   accent: '#059669', dot: '#34d399' },
+  { id: 'rose',        label: 'Rose',     bg: 'rgba(25,10,15,0.9)',   accent: '#e11d48', dot: '#fb7185' },
+  { id: 'amber',       label: 'Amber',    bg: 'rgba(22,16,5,0.9)',    accent: '#d97706', dot: '#fbbf24' },
 ];
 
 const FONTS: { id: FontFamily; label: string; stack: string }[] = [
   { id: 'plus-jakarta', label: 'Plus Jakarta Sans', stack: '"Plus Jakarta Sans", system-ui, sans-serif' },
-  { id: 'inter', label: 'Inter', stack: '"Inter", system-ui, sans-serif' },
-  { id: 'outfit', label: 'Outfit', stack: '"Outfit", system-ui, sans-serif' },
-  { id: 'geist', label: 'Geist', stack: '"Geist", system-ui, sans-serif' },
-  { id: 'mono', label: 'JetBrains Mono', stack: '"JetBrains Mono", "Fira Code", monospace' },
+  { id: 'inter',        label: 'Inter',              stack: '"Inter", system-ui, sans-serif' },
+  { id: 'outfit',       label: 'Outfit',             stack: '"Outfit", system-ui, sans-serif' },
+  { id: 'geist',        label: 'Geist',              stack: '"Geist", system-ui, sans-serif' },
+  { id: 'mono',         label: 'JetBrains Mono',     stack: '"JetBrains Mono", "Fira Code", monospace' },
 ];
 
+// ─── CSS Variable Injection ───────────────────────────────────────────────────
 
 export function applySettings(s: AppSettings) {
-  const theme = THEMES.find(t => t.id === s.theme)!;
-  const font = FONTS.find(f => f.id === s.fontFamily)!;
+  const theme = THEMES.find(t => t.id === s.theme) ?? THEMES[0];
+  const font  = FONTS.find(f => f.id === s.fontFamily) ?? FONTS[0];
 
   const opacity = Math.max(0.05, Math.min(1, s.bgOpacity));
-  const bgRgb = theme.bg.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+  const bgRgb   = theme.bg.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
   const r = bgRgb ? bgRgb[1] : '15';
   const g = bgRgb ? bgRgb[2] : '23';
   const b = bgRgb ? bgRgb[3] : '42';
 
   const accentRgb = hexToRgb(s.accentColor);
-
   const root = document.documentElement;
-  root.style.setProperty('--panel-bg', `rgba(${r},${g},${b},${opacity})`);
-  root.style.setProperty('--title-bar-bg', `rgba(${r},${g},${b},${Math.max(0.05, opacity - 0.25)})`);
-  root.style.setProperty('--panel-border', `rgba(255,255,255,${0.06 + opacity * 0.06})`);
-  root.style.setProperty('--blur-strength', `${s.blurStrength}px`);
-  root.style.setProperty('--accent', s.accentColor);
-  root.style.setProperty('--accent-hover', shadeHex(s.accentColor, -20));
-  root.style.setProperty('--accent-muted', accentRgb ? `rgba(${accentRgb},0.15)` : 'rgba(37,99,235,0.15)');
-  root.style.setProperty('--accent-2', theme.dot);
-  root.style.setProperty('--user-bubble', s.accentColor);
-  root.style.setProperty('--font-sans', font.stack);
-  root.style.setProperty('--font-size-base', `${s.fontSize}px`);
 
-  // Roundness
-  const rMap = { sharp: '8px', normal: '16px', round: '24px' };
-  root.style.setProperty('--panel-radius', rMap[s.roundness]);
-
-  // Spacing
-  const spMap = { compact: '10px', normal: '16px', relaxed: '22px' };
-  root.style.setProperty('--msg-spacing', spMap[s.messageSpacing]);
-
-  // Blur
-  const blurVal = `blur(${s.blurStrength}px) saturate(1.2)`;
-  root.style.setProperty('--backdrop-filter', blurVal);
+  root.style.setProperty('--panel-bg',        `rgba(${r},${g},${b},${opacity})`);
+  root.style.setProperty('--title-bar-bg',    `rgba(${r},${g},${b},${Math.max(0.05, opacity - 0.25)})`);
+  root.style.setProperty('--panel-border',    `rgba(255,255,255,${0.06 + opacity * 0.06})`);
+  root.style.setProperty('--accent',          s.accentColor);
+  root.style.setProperty('--accent-hover',    shadeHex(s.accentColor, -20));
+  root.style.setProperty('--accent-muted',    accentRgb ? `rgba(${accentRgb},0.15)` : 'rgba(37,99,235,0.15)');
+  root.style.setProperty('--accent-2',        theme.dot);
+  root.style.setProperty('--user-bubble',     s.accentColor);
+  root.style.setProperty('--font-sans',       font.stack);
+  root.style.setProperty('--font-size-base',  `${s.fontSize}px`);
+  root.style.setProperty('--panel-radius',    { sharp: '8px', normal: '16px', round: '24px' }[s.roundness]);
+  root.style.setProperty('--msg-spacing',     { compact: '10px', normal: '16px', relaxed: '22px' }[s.messageSpacing]);
+  root.style.setProperty('--backdrop-filter', `blur(${s.blurStrength}px) saturate(1.2)`);
 }
 
 function hexToRgb(hex: string): string | null {
@@ -111,12 +105,14 @@ function shadeHex(hex: string, amount: number): string {
   const m = hex.match(/^#([0-9a-f]{6})$/i);
   if (!m) return hex;
   const n = parseInt(m[1], 16);
-  const r = Math.max(0, Math.min(255, ((n >> 16) & 255) + amount));
-  const g = Math.max(0, Math.min(255, ((n >> 8) & 255) + amount));
-  const b = Math.max(0, Math.min(255, (n & 255) + amount));
+  const clamp = (x: number) => Math.max(0, Math.min(255, x));
+  const r = clamp(((n >> 16) & 255) + amount);
+  const g = clamp(((n >> 8)  & 255) + amount);
+  const b = clamp((n & 255) + amount);
   return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, '0')}`;
 }
 
+// ─── Storage ──────────────────────────────────────────────────────────────────
 
 const STORAGE_KEY = 'copilot-settings-v1';
 
@@ -134,21 +130,21 @@ export function saveSettings(s: AppSettings) {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(s)); } catch { /* noop */ }
 }
 
+// ─── Settings Panel Component ─────────────────────────────────────────────────
 
 interface SettingsPanelProps {
   open: boolean;
   settings: AppSettings;
+  activeSection: Section;
+  onSectionChange: (s: Section) => void;
   onClose: () => void;
   onChange: (s: AppSettings) => void;
+  onReset: () => void;
 }
 
-type Section = 'appearance' | 'typography' | 'layout' | 'advanced';
-
-export function SettingsPanel({ open, settings, onClose, onChange }: SettingsPanelProps) {
-  const [activeSection, setActiveSection] = [
-    (open ? (window as unknown as Record<string, unknown>)['__settingsSection'] as Section ?? 'appearance' : 'appearance'),
-    (s: Section) => { (window as unknown as Record<string, unknown>)['__settingsSection'] = s; },
-  ];
+export function SettingsPanel({
+  open, settings, activeSection, onSectionChange, onClose, onChange, onReset,
+}: SettingsPanelProps) {
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
@@ -157,17 +153,14 @@ export function SettingsPanel({ open, settings, onClose, onChange }: SettingsPan
   }, [open, onClose]);
 
   const set = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
-    const next = { ...settings, [key]: value };
-    onChange(next);
+    onChange({ ...settings, [key]: value });
   };
-
-  const reset = () => onChange(DEFAULT_SETTINGS);
 
   const SECTIONS: { id: Section; label: string; icon: React.ReactNode }[] = [
     { id: 'appearance', label: 'Appearance', icon: <Palette className="w-3.5 h-3.5" /> },
     { id: 'typography', label: 'Typography', icon: <Type className="w-3.5 h-3.5" /> },
-    { id: 'layout', label: 'Layout', icon: <Layout className="w-3.5 h-3.5" /> },
-    { id: 'advanced', label: 'Advanced', icon: <Sliders className="w-3.5 h-3.5" /> },
+    { id: 'layout',     label: 'Layout',     icon: <Layout className="w-3.5 h-3.5" /> },
+    { id: 'advanced',   label: 'Advanced',   icon: <Sliders className="w-3.5 h-3.5" /> },
   ];
 
   return (
@@ -181,6 +174,7 @@ export function SettingsPanel({ open, settings, onClose, onChange }: SettingsPan
           className="settings-panel"
           onMouseDown={e => e.stopPropagation()}
         >
+          {/* ── Header ─────────────────────────────────── */}
           <div className="settings-header">
             <div className="settings-title">
               <div className="settings-title-icon">
@@ -189,13 +183,8 @@ export function SettingsPanel({ open, settings, onClose, onChange }: SettingsPan
               <span>Settings</span>
             </div>
             <div className="flex items-center gap-1">
-              <button
-                type="button"
-                onClick={reset}
-                className="settings-reset-btn"
-                title="Reset to defaults"
-              >
-                <RotateCcw className="w-3 h-3 mr-1" />
+              <button type="button" onClick={onReset} className="settings-reset-btn" title="Reset to defaults">
+                <RotateCcw className="w-3 h-3" />
                 Reset
               </button>
               <button type="button" onClick={onClose} className="settings-close-btn" title="Close">
@@ -204,13 +193,14 @@ export function SettingsPanel({ open, settings, onClose, onChange }: SettingsPan
             </div>
           </div>
 
+          {/* ── Section tabs ────────────────────────────── */}
           <div className="settings-tabs">
             {SECTIONS.map(sec => (
               <button
                 key={sec.id}
                 type="button"
                 className={`settings-tab ${activeSection === sec.id ? 'settings-tab--active' : ''}`}
-                onClick={() => setActiveSection(sec.id)}
+                onClick={() => onSectionChange(sec.id)}
               >
                 {sec.icon}
                 {sec.label}
@@ -218,8 +208,10 @@ export function SettingsPanel({ open, settings, onClose, onChange }: SettingsPan
             ))}
           </div>
 
+          {/* ── Body ────────────────────────────────────── */}
           <div className="settings-body">
 
+            {/* APPEARANCE */}
             {activeSection === 'appearance' && (
               <div className="settings-section-content">
                 <SettingsGroup label="Color Theme">
@@ -235,9 +227,7 @@ export function SettingsPanel({ open, settings, onClose, onChange }: SettingsPan
                       >
                         <span className="theme-dot" style={{ background: t.dot }} />
                         <span className="theme-swatch-label">{t.label}</span>
-                        {settings.theme === t.id && (
-                          <span className="theme-check">✓</span>
-                        )}
+                        {settings.theme === t.id && <span className="theme-check">✓</span>}
                       </button>
                     ))}
                   </div>
@@ -245,7 +235,7 @@ export function SettingsPanel({ open, settings, onClose, onChange }: SettingsPan
 
                 <SettingsGroup label="Accent Color">
                   <div className="accent-row">
-                    {['#2563eb', '#7c3aed', '#0891b2', '#059669', '#e11d48', '#d97706', '#ec4899'].map(c => (
+                    {['#2563eb','#7c3aed','#0891b2','#059669','#e11d48','#d97706','#ec4899'].map(c => (
                       <button
                         key={c}
                         type="button"
@@ -255,7 +245,7 @@ export function SettingsPanel({ open, settings, onClose, onChange }: SettingsPan
                         title={c}
                       />
                     ))}
-                    <label className="accent-custom" title="Custom color">
+                    <label className="accent-custom" title="Pick custom color">
                       <input
                         type="color"
                         value={settings.accentColor}
@@ -269,30 +259,26 @@ export function SettingsPanel({ open, settings, onClose, onChange }: SettingsPan
 
                 <SettingsGroup label={`Background Opacity — ${Math.round(settings.bgOpacity * 100)}%`}>
                   <RangeInput
-                    value={settings.bgOpacity}
-                    min={0.05} max={1} step={0.01}
+                    value={settings.bgOpacity} min={0.05} max={1} step={0.01}
                     onChange={v => set('bgOpacity', v)}
-                    leftLabel="Transparent"
-                    rightLabel="Solid"
+                    leftLabel="Transparent" rightLabel="Solid"
                   />
                 </SettingsGroup>
 
                 <SettingsGroup label={`Blur Strength — ${settings.blurStrength}px`}>
                   <RangeInput
-                    value={settings.blurStrength}
-                    min={0} max={40} step={1}
+                    value={settings.blurStrength} min={0} max={40} step={1}
                     onChange={v => set('blurStrength', v)}
-                    leftLabel="None"
-                    rightLabel="Heavy"
+                    leftLabel="None" rightLabel="Heavy"
                   />
                 </SettingsGroup>
 
                 <SettingsGroup label="Panel Corners">
                   <SegmentedControl
                     options={[
-                      { value: 'sharp', label: 'Sharp' },
+                      { value: 'sharp',  label: 'Sharp' },
                       { value: 'normal', label: 'Normal' },
-                      { value: 'round', label: 'Round' },
+                      { value: 'round',  label: 'Round' },
                     ]}
                     value={settings.roundness}
                     onChange={v => set('roundness', v as AppSettings['roundness'])}
@@ -301,6 +287,7 @@ export function SettingsPanel({ open, settings, onClose, onChange }: SettingsPan
               </div>
             )}
 
+            {/* TYPOGRAPHY */}
             {activeSection === 'typography' && (
               <div className="settings-section-content">
                 <SettingsGroup label="Font Family">
@@ -323,11 +310,9 @@ export function SettingsPanel({ open, settings, onClose, onChange }: SettingsPan
 
                 <SettingsGroup label={`Font Size — ${settings.fontSize}px`}>
                   <RangeInput
-                    value={settings.fontSize}
-                    min={11} max={18} step={1}
+                    value={settings.fontSize} min={11} max={18} step={1}
                     onChange={v => set('fontSize', v)}
-                    leftLabel="Tiny"
-                    rightLabel="Large"
+                    leftLabel="Tiny" rightLabel="Large"
                   />
                   <div className="font-size-preview" style={{ fontSize: settings.fontSize }}>
                     The quick brown fox jumps over the lazy dog.
@@ -336,14 +321,15 @@ export function SettingsPanel({ open, settings, onClose, onChange }: SettingsPan
               </div>
             )}
 
+            {/* LAYOUT */}
             {activeSection === 'layout' && (
               <div className="settings-section-content">
                 <SettingsGroup label="Message Spacing">
                   <SegmentedControl
                     options={[
-                      { value: 'compact', label: 'Compact' },
-                      { value: 'normal', label: 'Normal' },
-                      { value: 'relaxed', label: 'Relaxed' },
+                      { value: 'compact',  label: 'Compact' },
+                      { value: 'normal',   label: 'Normal' },
+                      { value: 'relaxed',  label: 'Relaxed' },
                     ]}
                     value={settings.messageSpacing}
                     onChange={v => set('messageSpacing', v as AppSettings['messageSpacing'])}
@@ -360,7 +346,7 @@ export function SettingsPanel({ open, settings, onClose, onChange }: SettingsPan
                     />
                     <ToggleRow
                       label="Compact mode"
-                      description="Reduce padding for denser layout"
+                      description="Reduce padding for a denser layout"
                       checked={settings.compactMode}
                       onChange={v => set('compactMode', v)}
                     />
@@ -375,26 +361,22 @@ export function SettingsPanel({ open, settings, onClose, onChange }: SettingsPan
               </div>
             )}
 
+            {/* ADVANCED */}
             {activeSection === 'advanced' && (
               <div className="settings-section-content">
                 <SettingsGroup label="About">
                   <div className="about-card">
-                    <div className="about-row">
-                      <span className="about-key">Version</span>
-                      <span className="about-val">1.0.0</span>
-                    </div>
-                    <div className="about-row">
-                      <span className="about-key">Engine</span>
-                      <span className="about-val">Groq · LLaMA 3.3 70B</span>
-                    </div>
-                    <div className="about-row">
-                      <span className="about-key">OCR</span>
-                      <span className="about-val">Tesseract.js</span>
-                    </div>
-                    <div className="about-row">
-                      <span className="about-key">Platform</span>
-                      <span className="about-val">Electron + React</span>
-                    </div>
+                    {[
+                      { k: 'Version',  v: '1.0.0' },
+                      { k: 'Engine',   v: 'Groq · LLaMA 3.3 70B' },
+                      { k: 'OCR',      v: 'Tesseract.js' },
+                      { k: 'Platform', v: 'Electron + React' },
+                    ].map(row => (
+                      <div key={row.k} className="about-row">
+                        <span className="about-key">{row.k}</span>
+                        <span className="about-val">{row.v}</span>
+                      </div>
+                    ))}
                   </div>
                 </SettingsGroup>
 
@@ -402,14 +384,14 @@ export function SettingsPanel({ open, settings, onClose, onChange }: SettingsPan
                   <div className="shortcuts-list">
                     {[
                       { keys: ['⌘', '⇧', 'Space'], action: 'Toggle hide/show' },
-                      { keys: ['⌘', '⇧', 'G'], action: 'Ghost mode (click-through)' },
-                      { keys: ['Enter'], action: 'Send message' },
-                      { keys: ['Esc'], action: 'Close settings' },
-                    ].map(s => (
-                      <div key={s.action} className="shortcut-row">
-                        <span className="shortcut-action">{s.action}</span>
+                      { keys: ['⌘', '⇧', 'G'],     action: 'Ghost mode (click-through)' },
+                      { keys: ['Enter'],             action: 'Send message' },
+                      { keys: ['Esc'],               action: 'Close settings' },
+                    ].map(sc => (
+                      <div key={sc.action} className="shortcut-row">
+                        <span className="shortcut-action">{sc.action}</span>
                         <div className="shortcut-keys">
-                          {s.keys.map(k => <kbd key={k} className="kbd">{k}</kbd>)}
+                          {sc.keys.map(k => <kbd key={k} className="kbd">{k}</kbd>)}
                         </div>
                       </div>
                     ))}
@@ -417,11 +399,7 @@ export function SettingsPanel({ open, settings, onClose, onChange }: SettingsPan
                 </SettingsGroup>
 
                 <SettingsGroup label="Danger Zone">
-                  <button
-                    type="button"
-                    className="danger-btn"
-                    onClick={reset}
-                  >
+                  <button type="button" className="danger-btn" onClick={onReset}>
                     <RotateCcw className="w-3.5 h-3.5 mr-1.5" />
                     Reset all settings to defaults
                   </button>
@@ -434,6 +412,8 @@ export function SettingsPanel({ open, settings, onClose, onChange }: SettingsPan
     </AnimatePresence>
   );
 }
+
+// ─── Sub-components ───────────────────────────────────────────────────────────
 
 function SettingsGroup({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -454,9 +434,7 @@ function RangeInput({ value, min, max, step, onChange, leftLabel, rightLabel }: 
   return (
     <div className="range-wrap">
       <input
-        type="range"
-        min={min} max={max} step={step}
-        value={value}
+        type="range" min={min} max={max} step={step} value={value}
         onChange={e => onChange(Number(e.target.value))}
         className="range-input"
         style={{ '--range-pct': `${pct}%` } as React.CSSProperties}
@@ -501,9 +479,7 @@ function ToggleRow({ label, description, checked, onChange }: {
         <span className="toggle-desc">{description}</span>
       </div>
       <button
-        type="button"
-        role="switch"
-        aria-checked={checked}
+        type="button" role="switch" aria-checked={checked}
         className={`toggle-switch ${checked ? 'toggle-switch--on' : ''}`}
         onClick={() => onChange(!checked)}
       >
