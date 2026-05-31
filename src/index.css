@@ -18,6 +18,8 @@
   --input-bg: rgba(0, 0, 0, 0.25);
   --font-sans: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
   --font-mono: "JetBrains Mono", "Fira Code", ui-monospace, monospace;
+  --panel-radius: 24px;
+  --backdrop-filter: blur(20px) saturate(1.2);
 }
 
 @layer base {
@@ -58,12 +60,22 @@
 
 .copilot-panel {
   background: var(--panel-bg);
-  backdrop-filter: var(--backdrop-filter, blur(20px) saturate(1.2)) !important;
-  -webkit-backdrop-filter: var(--backdrop-filter, blur(20px) saturate(1.2)) !important;
+  backdrop-filter: var(--backdrop-filter);
+  -webkit-backdrop-filter: var(--backdrop-filter);
   border: 1px solid var(--panel-border);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
-  border-radius: var(--panel-radius, 24px);
+  border-radius: var(--panel-radius);
   font-family: var(--font-sans);
+  /* overflow:hidden on this element breaks backdrop-filter in Chromium */
+}
+
+.copilot-panel-inner {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  border-radius: inherit;
 }
 
 .title-bar {
@@ -455,10 +467,10 @@
 
 .collapsed-bar {
   background: var(--panel-bg);
-  backdrop-filter: var(--backdrop-filter, blur(16px) saturate(1.2)) !important;
-  -webkit-backdrop-filter: var(--backdrop-filter, blur(16px) saturate(1.2)) !important;
+  backdrop-filter: var(--backdrop-filter);
+  -webkit-backdrop-filter: var(--backdrop-filter);
   border: 1px solid var(--panel-border);
-  border-radius: var(--panel-radius, 12px);
+  border-radius: var(--panel-radius);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
   font-family: var(--font-sans);
 }
@@ -541,9 +553,9 @@
   right: 16px;
   width: 315px;
   max-height: calc(100vh - 80px);
-  background: rgba(8, 11, 22, 0.98);
-  backdrop-filter: blur(32px) saturate(1.6) !important;
-  -webkit-backdrop-filter: blur(32px) saturate(1.6) !important;
+  background: var(--panel-bg);
+  backdrop-filter: var(--backdrop-filter);
+  -webkit-backdrop-filter: var(--backdrop-filter);
   border: 1px solid rgba(255, 255, 255, 0.13);
   border-radius: 20px;
   box-shadow:

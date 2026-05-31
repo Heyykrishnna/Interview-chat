@@ -66,6 +66,28 @@ const FONTS: { id: FontFamily; label: string; stack: string }[] = [
 
 // ─── CSS Variable Injection ───────────────────────────────────────────────────
 
+export function backdropFilterCSSValue(blurStrength: number): string {
+  const px = Math.max(0, Math.min(40, Number(blurStrength) || 0));
+  if (px <= 0) return 'none';
+  return `blur(${px}px) saturate(1.2)`;
+}
+
+const BLUR_PANEL_SELECTOR = '.copilot-panel, .collapsed-bar, .settings-panel';
+
+function applyBackdropToElement(
+  el: HTMLElement,
+  blurVal: string,
+  panelBg: string,
+  radius: string,
+  fontStack: string,
+) {
+  el.style.setProperty('backdrop-filter', blurVal, 'important');
+  el.style.setProperty('-webkit-backdrop-filter', blurVal, 'important');
+  el.style.background = panelBg;
+  el.style.borderRadius = radius;
+  el.style.fontFamily = fontStack;
+}
+
 export function applySettings(s: AppSettings) {
   const theme = THEMES.find(t => t.id === s.theme) ?? THEMES[0];
   const font  = FONTS.find(f => f.id === s.fontFamily) ?? FONTS[0];
@@ -78,8 +100,10 @@ export function applySettings(s: AppSettings) {
 
   const accentRgb = hexToRgb(s.accentColor);
   const root = document.documentElement;
-  const blurVal = `blur(${s.blurStrength}px) saturate(1.2)`;
+  const blurVal = backdropFilterCSSValue(s.blurStrength);
+  const panelBg = `rgba(${r},${g},${b},${opacity})`;
   const radiusMap = { sharp: '8px', normal: '16px', round: '24px' } as const;
+  const radius = radiusMap[s.roundness];
 
   // ── CSS Variables ─────────────────────────────────────────
   root.style.setProperty('--panel-bg',        `rgba(${r},${g},${b},${opacity})`);
@@ -101,25 +125,14 @@ export function applySettings(s: AppSettings) {
   document.body.style.fontFamily = font.stack;
   document.documentElement.style.fontFamily = font.stack;
 
-  // Blur & radius — force directly onto panel elements after next paint
-  // (rAF ensures elements exist in DOM when we query them)
-  requestAnimationFrame(() => {
-    const applyToEl = (el: HTMLElement) => {
-      el.style.backdropFilter = blurVal;
-      (el.style as unknown as Record<string, string>)['-webkit-backdrop-filter'] = blurVal;
-      el.style.background = `rgba(${r},${g},${b},${opacity})`;
-      el.style.borderRadius = radiusMap[s.roundness];
-      el.style.fontFamily = font.stack;
-    };
-    document.querySelectorAll<HTMLElement>('.copilot-panel').forEach(applyToEl);
-    document.querySelectorAll<HTMLElement>('.collapsed-bar').forEach(el => {
-      el.style.backdropFilter = blurVal;
-      (el.style as unknown as Record<string, string>)['-webkit-backdrop-filter'] = blurVal;
-      el.style.background = `rgba(${r},${g},${b},${opacity})`;
-      el.style.borderRadius = radiusMap[s.roundness];
-      el.style.fontFamily = font.stack;
+  // Blur & panel chrome — Electron/Chromium need direct styles on glass surfaces
+  const syncGlassPanels = () => {
+    document.querySelectorAll<HTMLElement>(BLUR_PANEL_SELECTOR).forEach(el => {
+      applyBackdropToElement(el, blurVal, panelBg, radius, font.stack);
     });
-  });
+  };
+  syncGlassPanels();
+  requestAnimationFrame(syncGlassPanels);
 }
 
 function hexToRgb(hex: string): string | null {

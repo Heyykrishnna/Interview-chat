@@ -116,7 +116,7 @@ export default function App() {
   useLayoutEffect(() => {
     applySettings(settings);
     saveSettings(settings);
-  }, [settings]);
+  }, [settings, isCollapsed, isSettingsOpen]);
 
   const handleSettingsChange = useCallback((next: AppSettings) => {
     setSettings(next);
@@ -619,7 +619,8 @@ export default function App() {
         }`}
         style={expandedShellStyle}
       >
-        <div className="copilot-panel relative flex flex-col h-full" style={{ overflow: 'hidden' }}>
+        <div className="copilot-panel relative h-full">
+          <div className="copilot-panel-inner">
           <div
             className="title-bar flex items-center justify-between px-4 py-3 cursor-grab active:cursor-grabbing select-none shrink-0"
             onMouseDown={onDragStart}
@@ -851,6 +852,7 @@ export default function App() {
             >
               <Send className="w-4 h-4" />
             </button>
+          </div>
           </div>
 
           <div
