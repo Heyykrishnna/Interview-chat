@@ -15,6 +15,7 @@ export type Theme =
 
 export type FontFamily = 'plus-jakarta' | 'inter' | 'outfit' | 'geist' | 'mono';
 export type Section = 'appearance' | 'typography' | 'layout' | 'advanced';
+export type ResponseLanguage = 'english' | 'hinglish';
 
 export interface AppSettings {
   theme: Theme;
@@ -28,6 +29,8 @@ export interface AppSettings {
   compactMode: boolean;
   roundness: 'sharp' | 'normal' | 'round';
   accentColor: string;
+  responseLanguage: ResponseLanguage;
+  includeApproach: boolean;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -42,6 +45,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   compactMode: false,
   roundness: 'round',
   accentColor: '#2563eb',
+  responseLanguage: 'english',
+  includeApproach: true,
 };
 
 // ─── Theme & Font Definitions ─────────────────────────────────────────────────
@@ -441,6 +446,25 @@ export function SettingsPanel({
                     <RotateCcw className="w-3.5 h-3.5 mr-1.5" />
                     Reset all settings to defaults
                   </button>
+                </SettingsGroup>
+
+                <SettingsGroup label="Response Preferences">
+                  <SegmentedControl
+                    options={[
+                      { value: 'english', label: 'English' },
+                      { value: 'hinglish', label: 'Hinglish' },
+                    ]}
+                    value={settings.responseLanguage}
+                    onChange={v => set('responseLanguage', v as AppSettings['responseLanguage'])}
+                  />
+                  <div className="toggle-list mt-2">
+                    <ToggleRow
+                      label="Include approach"
+                      description="Show the solving approach before final answer"
+                      checked={settings.includeApproach}
+                      onChange={v => set('includeApproach', v)}
+                    />
+                  </div>
                 </SettingsGroup>
               </div>
             )}

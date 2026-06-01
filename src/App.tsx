@@ -15,6 +15,7 @@ import {
   saveSettings,
   applySettings,
   DEFAULT_SETTINGS,
+  type Section,
 } from './components/Settings';
 import type { AppSettings } from './components/Settings';
 
@@ -62,17 +63,54 @@ const DEFAULT_FOLLOW_UPS = [
   'What follow-up questions might they ask?',
 ];
 
-const SYSTEM_PROMPT = `You are an elite AI interview copilot — sharp, confident, and technically precise.
+const BASE_SYSTEM_PROMPT = `You are an elite AI interview copilot — sharp, confident, and technically precise.
 
 Formatting rules (follow strictly):
 - Use **markdown** for structure: bold for emphasis, numbered lists for steps, bullet lists for options.
 - Wrap all code, commands, SQL, regex, and config in fenced blocks with the correct language tag (e.g. \`\`\`python, \`\`\`sql, \`\`\`bash).
 - Use \`inline code\` for identifiers, function names, keys, and short snippets.
 - Keep answers focused: 80–150 words unless the user asks for depth.
-- Sound like a senior engineer in a live interview — direct, no fluff.
+- Sound like a senior engineer in a live interview — direct, no fluff.`;
 
-Screen context (OCR snapshot):
-`;
+function getLanguageInstruction(language: AppSettings['responseLanguage']): string {
+  if (language === 'hinglish') {
+    return [
+      'Language preference:',
+      '- Write explanations in Hinglish (Roman script, easy conversational tone).',
+      '- Keep all code blocks, commands, SQL, config keys, identifiers, and code comments in proper English only.',
+      '- Do not translate programming syntax or keywords.',
+    ].join('\n');
+  }
+
+  return [
+    'Language preference:',
+    '- Write the full response in clear professional English.',
+  ].join('\n');
+}
+
+function getApproachInstruction(includeApproach: boolean): string {
+  if (includeApproach) {
+    return [
+      'Approach preference:',
+      '- Start with a short approach (2-4 bullets), then provide the final answer.',
+    ].join('\n');
+  }
+
+  return [
+    'Approach preference:',
+    '- Skip approach and reasoning steps.',
+    '- Provide direct actionable answer only unless the user explicitly asks for explanation.',
+  ].join('\n');
+}
+
+function buildSystemPrompt(settings: AppSettings): string {
+  return [
+    BASE_SYSTEM_PROMPT,
+    getLanguageInstruction(settings.responseLanguage),
+    getApproachInstruction(settings.includeApproach),
+    '\nScreen context (OCR snapshot):\n',
+  ].join('\n\n');
+}
 
 function ipc(): { invoke: (c: string, ...a: unknown[]) => Promise<unknown>; on: (e: string, fn: () => void) => void; removeListener: (e: string, fn: () => void) => void } | null {
   try {
@@ -109,7 +147,7 @@ export default function App() {
   const [followUpsLoading, setFollowUpsLoading] = useState(false);
   const [isFollowUpsExpanded, setIsFollowUpsExpanded] = useState(true);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [activeSettingsSection, setActiveSettingsSection] = useState<'appearance' | 'typography' | 'layout' | 'advanced'>('appearance');
+  const [activeSettingsSection, setActiveSettingsSection] = useState<Section>('appearance');
   const [settings, setSettings] = useState<AppSettings>(() => loadSettings());
 
   // Apply settings before every paint (useLayoutEffect avoids flicker)
@@ -457,7 +495,10 @@ export default function App() {
           {
             role: 'system',
             content:
-              'Reply with ONLY a JSON array of exactly 3 short follow-up questions (strings) the user might ask next in an interview prep chat. No markdown, no keys, no explanation — only the JSON array.',
+              `Reply with ONLY a JSON array of exactly 3 short follow-up questions (strings) the user might ask next in an interview prep chat.
+No markdown, no keys, no explanation — only the JSON array.
+Language: ${settings.responseLanguage === 'hinglish' ? 'Hinglish (Roman script)' : 'English'}.
+Keep any code words and technical identifiers in proper English.`,
           },
           {
             role: 'user',
@@ -475,7 +516,7 @@ export default function App() {
       console.error(e);
       return [...DEFAULT_FOLLOW_UPS];
     }
-  }, []);
+  }, [settings.responseLanguage]);
 
   const sendMessage = useCallback(
     async (text: string) => {
@@ -495,7 +536,7 @@ export default function App() {
           temperature: 0.3,
           max_completion_tokens: 400,
           messages: [
-            { role: 'system', content: SYSTEM_PROMPT + (latestOcr.current || '(none — enable Screen Context)') },
+            { role: 'system', content: buildSystemPrompt(settings) + (latestOcr.current || '(none — enable Screen Context)') },
             ...history.map(m => ({ role: m.role, content: m.content })),
           ],
         });
@@ -518,7 +559,7 @@ export default function App() {
         setTimeout(() => inputRef.current?.focus(), 100);
       }
     },
-    [isLoading, messages, fetchFollowUps],
+    [isLoading, messages, fetchFollowUps, settings],
   );
 
   const clearChat = () => {
