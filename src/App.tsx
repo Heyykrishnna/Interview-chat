@@ -24,6 +24,7 @@ import {
   SystemDesignWhiteboard,
   type SystemDesignData,
 } from './components/SystemDesignWhiteboard';
+import { IconTooltip } from './components/IconTooltip';
 
 const PANEL_DEFAULT_W = 440;
 const PANEL_DEFAULT_H = 540;
@@ -900,14 +901,18 @@ Include at least 6 API endpoints, 4 database tables, and make all numbers realis
                 {timerDisplay}
               </span>
             )}
-            <button
-              type="button"
-              onClick={e => { e.stopPropagation(); handleExpand(); }}
-              className="icon-btn ml-0.5 shrink-0"
-              title="Expand"
+            <IconTooltip
+              label="Expand Panel"
+              hint="Open the full chat window with messages, input, and tools."
             >
-              <ChevronDown className="w-4 h-4" />
-            </button>
+              <button
+                type="button"
+                onClick={e => { e.stopPropagation(); handleExpand(); }}
+                className="icon-btn ml-0.5 shrink-0"
+              >
+                <ChevronDown className="w-4 h-4" />
+              </button>
+            </IconTooltip>
           </div>
         </div>
         <video ref={videoRef} className="hidden" muted playsInline />
@@ -951,93 +956,147 @@ Include at least 6 API endpoints, 4 database tables, and make all numbers realis
                 onMouseDown={e => e.stopPropagation()}
               >
                 <div className="relative">
+                  <IconTooltip
+                    label="Interview Timer"
+                    hint="Set countdown or count-up length and open timer controls for timed rounds."
+                    align="center"
+                  >
+                    <button
+                      type="button"
+                      className={`timer-display-btn ${isTimerWarning ? 'timer-warning' : ''} ${isTimerFinished ? 'timer-finished' : ''}`}
+                      onClick={() => setShowTimerPopup(p => !p)}
+                    >
+                      <Timer className="w-3 h-3 opacity-70 shrink-0" />
+                      <span className="timer-display-text">{timerDisplay}</span>
+                    </button>
+                  </IconTooltip>
+                </div>
+                <IconTooltip
+                  label={timerRunning ? 'Pause Timer' : isTimerFinished ? 'Restart Timer' : 'Start Timer'}
+                  hint={
+                    timerRunning
+                      ? 'Pause the clock without resetting elapsed time.'
+                      : isTimerFinished
+                        ? 'Reset and start again from your configured duration.'
+                        : 'Begin counting up or down based on your timer mode.'
+                  }
+                >
                   <button
                     type="button"
-                    className={`timer-display-btn ${isTimerWarning ? 'timer-warning' : ''} ${isTimerFinished ? 'timer-finished' : ''}`}
-                    onClick={() => setShowTimerPopup(p => !p)}
-                    title="Timer settings"
+                    onClick={toggleTimer}
+                    className={`icon-btn shrink-0 ${timerRunning ? 'icon-btn--active' : ''}`}
                   >
-                    <Timer className="w-3 h-3 opacity-70 shrink-0" />
-                    <span className="timer-display-text">{timerDisplay}</span>
+                    {timerRunning
+                      ? <Pause className="w-3.5 h-3.5" />
+                      : <Play className="w-3.5 h-3.5" />}
                   </button>
-                </div>
-                <button
-                  type="button"
-                  onClick={toggleTimer}
-                  className={`icon-btn shrink-0 ${timerRunning ? 'icon-btn--active' : ''}`}
-                  title={timerRunning ? 'Pause timer' : isTimerFinished ? 'Restart timer' : 'Start timer'}
-                >
-                  {timerRunning
-                    ? <Pause className="w-3.5 h-3.5" />
-                    : <Play className="w-3.5 h-3.5" />}
-                </button>
+                </IconTooltip>
               </div>
 
               {/* Right: actions */}
               <div className="flex items-center gap-0.5 shrink-0" onMouseDown={e => e.stopPropagation()}>
-                <button
-                  type="button"
-                  onClick={toggleGhost}
-                  title={isGhost ? 'Disable Ghost Mode (⌘⇧G)' : 'Ghost Mode — click-through (⌘⇧G)'}
-                  className={`icon-btn ${isGhost ? 'icon-btn--active' : ''}`}
+                <IconTooltip
+                  label={isGhost ? 'Disable Ghost Mode' : 'Ghost Mode'}
+                  hint={
+                    isGhost
+                      ? 'Return to a normal, fully visible window that accepts clicks (⌘⇧G).'
+                      : 'Fade the panel and pass clicks through so you can use apps underneath during a call (⌘⇧G).'
+                  }
                 >
-                  {isGhost ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
-                </button>
-                <button
-                  type="button"
-                  onClick={isScanning ? stopScanning : startScanning}
-                  title={isScanning ? 'Stop Screen Context' : 'Start Screen Context'}
-                  className={`icon-btn ${isScanning ? 'icon-btn--active' : ''}`}
+                  <button
+                    type="button"
+                    onClick={toggleGhost}
+                    className={`icon-btn ${isGhost ? 'icon-btn--active' : ''}`}
+                  >
+                    {isGhost ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+                  </button>
+                </IconTooltip>
+                <IconTooltip
+                  label={isScanning ? 'Stop Screen Context' : 'Screen Context'}
+                  hint={
+                    isScanning
+                      ? 'Stop OCR capture from your display.'
+                      : 'Read on-screen text (LeetCode, docs, IDE) so answers match what you are looking at.'
+                  }
                 >
-                  <Monitor className="w-4 h-4" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { setIsPinsOpen(p => !p); setIsSettingsOpen(false); }}
-                  title={`Saved snippets (${pinnedMessages.length})`}
-                  className={`icon-btn relative ${isPinsOpen ? 'icon-btn--active' : ''}`}
+                  <button
+                    type="button"
+                    onClick={isScanning ? stopScanning : startScanning}
+                    className={`icon-btn ${isScanning ? 'icon-btn--active' : ''}`}
+                  >
+                    <Monitor className="w-4 h-4" />
+                  </button>
+                </IconTooltip>
+                <IconTooltip
+                  label="Saved Snippets"
+                  hint={`Bookmark strong answers to reopen later${pinnedMessages.length > 0 ? ` (${pinnedMessages.length} saved)` : ''}.`}
                 >
-                  <Bookmark className="w-4 h-4" />
-                  {pinnedMessages.length > 0 && (
-                    <span className="pin-badge">{pinnedMessages.length > 9 ? '9+' : pinnedMessages.length}</span>
-                  )}
-                </button>
-                <button
-                  type="button"
-                  onClick={clearChat}
-                  title="Clear chat"
-                  className="icon-btn icon-btn--danger"
+                  <button
+                    type="button"
+                    onClick={() => { setIsPinsOpen(p => !p); setIsSettingsOpen(false); }}
+                    className={`icon-btn relative ${isPinsOpen ? 'icon-btn--active' : ''}`}
+                  >
+                    <Bookmark className="w-4 h-4" />
+                    {pinnedMessages.length > 0 && (
+                      <span className="pin-badge">{pinnedMessages.length > 9 ? '9+' : pinnedMessages.length}</span>
+                    )}
+                  </button>
+                </IconTooltip>
+                <IconTooltip
+                  label="Clear Chat"
+                  hint="Remove all messages and start a fresh conversation."
+                  align="end"
                 >
-                  <Trash2 className="w-4 h-4" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsWhiteboardOpen(p => !p);
-                    setIsSettingsOpen(false);
-                    setIsPinsOpen(false);
-                  }}
-                  title="System Design Whiteboard"
-                  className={`icon-btn ${isWhiteboardOpen ? 'icon-btn--active' : ''}`}
+                  <button
+                    type="button"
+                    onClick={clearChat}
+                    className="icon-btn icon-btn--danger"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </IconTooltip>
+                <IconTooltip
+                  label="System Design Whiteboard"
+                  hint='Generate architecture diagrams, APIs, DB schemas, and scaling (e.g. type "design Uber").'
                 >
-                  <Cpu className="w-4 h-4" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { setIsSettingsOpen(prev => !prev); setIsPinsOpen(false); setActiveSettingsSection('appearance'); }}
-                  title="Settings"
-                  className={`icon-btn ${isSettingsOpen ? 'icon-btn--active' : ''}`}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsWhiteboardOpen(p => !p);
+                      setIsSettingsOpen(false);
+                      setIsPinsOpen(false);
+                    }}
+                    className={`icon-btn ${isWhiteboardOpen ? 'icon-btn--active' : ''}`}
+                  >
+                    <Cpu className="w-4 h-4" />
+                  </button>
+                </IconTooltip>
+                <IconTooltip
+                  label="Settings"
+                  hint="Theme, language, interview mode, compact layout, and response style."
+                  align="end"
                 >
-                  <Settings className="w-4 h-4" />
-                </button>
-                <button
-                  type="button"
-                  onClick={handleCollapse}
-                  title="Collapse"
-                  className="icon-btn"
+                  <button
+                    type="button"
+                    onClick={() => { setIsSettingsOpen(prev => !prev); setIsPinsOpen(false); setActiveSettingsSection('appearance'); }}
+                    className={`icon-btn ${isSettingsOpen ? 'icon-btn--active' : ''}`}
+                  >
+                    <Settings className="w-4 h-4" />
+                  </button>
+                </IconTooltip>
+                <IconTooltip
+                  label="Collapse Panel"
+                  hint="Shrink to a minimal bar while keeping the app running in the background."
+                  align="end"
                 >
-                  <ChevronUp className="w-4 h-4" />
-                </button>
+                  <button
+                    type="button"
+                    onClick={handleCollapse}
+                    className="icon-btn"
+                  >
+                    <ChevronUp className="w-4 h-4" />
+                  </button>
+                </IconTooltip>
               </div>
             </div>
 
