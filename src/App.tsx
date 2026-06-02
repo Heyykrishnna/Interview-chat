@@ -72,6 +72,11 @@ const groq = new Groq({
   dangerouslyAllowBrowser: true,
 });
 
+const groqWorkflow = new Groq({
+  apiKey: import.meta.env.VITE_GROQ_WORKFLOW_API_KEY || import.meta.env.VITE_GROQ_API_KEY || '',
+  dangerouslyAllowBrowser: true,
+});
+
 // ─── Interview Modes ─────────────────────────────────────────────────────────
 
 const INTERVIEW_MODES: {
@@ -665,16 +670,16 @@ Keep any code words and technical identifiers in proper English.`,
 
   // ── System Design Generator ───────────────────────────────────────────────
   const generateSystemDesign = useCallback(async (system: string) => {
-    const key = import.meta.env.VITE_GROQ_API_KEY;
+    const key = import.meta.env.VITE_GROQ_WORKFLOW_API_KEY || import.meta.env.VITE_GROQ_API_KEY;
     if (!key) {
-      addMsg('assistant', '**API key missing** — add `VITE_GROQ_API_KEY` to `.env` to use the Whiteboard.');
+      addMsg('assistant', '**API key missing** — add `VITE_GROQ_WORKFLOW_API_KEY` to `.env` to use the Whiteboard.');
       return;
     }
     setIsWhiteboardOpen(true);
     setWhiteboardLoading(true);
     setWhiteboardData(null);
     try {
-      const completion = await groq.chat.completions.create({
+      const completion = await groqWorkflow.chat.completions.create({
         model: 'llama-3.3-70b-versatile',
         temperature: 0.25,
         max_completion_tokens: 3000,
