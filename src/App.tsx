@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef, useCallback, useLayoutEffect } from 'react';
 import {
   Mic, Monitor, EyeOff, Send, MicOff, Trash2,
-  ChevronDown, ChevronUp, Eye, Loader2, Sparkles, Fan, Settings,
+  ChevronDown, ChevronUp, Eye, Loader2, Fan, Settings,
+  BookmarkPlus, Bookmark, Timer, Copy, Check, Play, Pause, RotateCcw,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Tesseract from 'tesseract.js';
@@ -16,26 +17,41 @@ import {
   applySettings,
   DEFAULT_SETTINGS,
   type Section,
+  type InterviewMode,
 } from './components/Settings';
 import type { AppSettings } from './components/Settings';
 
 const PANEL_DEFAULT_W = 440;
-const PANEL_DEFAULT_H = 520;
+const PANEL_DEFAULT_H = 540;
 const PANEL_MIN_W = 300;
-const PANEL_MIN_H = 360;
+const PANEL_MIN_H = 380;
 const PANEL_MAX_W = 720;
 const PANEL_MAX_H = 900;
 const COLLAPSED_H = 48;
+const PINS_KEY = 'copilot-pins-v1';
 
 type WindowBounds = { x: number; y: number; width: number; height: number };
 type ResizeEdge = 'e' | 's' | 'se' | 'w';
 type PanelSize = { width: number; height: number };
+type Message = { id: string; role: 'user' | 'assistant'; content: string };
+type PinnedMessage = { id: string; content: string; pinnedAt: number; mode: InterviewMode };
 
 function clampPanelSize(w: number, h: number): PanelSize {
   return {
     width: Math.round(Math.max(PANEL_MIN_W, Math.min(PANEL_MAX_W, w))),
     height: Math.round(Math.max(PANEL_MIN_H, Math.min(PANEL_MAX_H, h))),
   };
+}
+
+function makeId(): string {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2);
+}
+
+function formatTimer(secs: number): string {
+  const abs = Math.max(0, secs);
+  const m = Math.floor(abs / 60);
+  const s = abs % 60;
+  return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
 }
 
 const IS_ELECTRON = (() => {
@@ -52,10 +68,78 @@ const groq = new Groq({
   dangerouslyAllowBrowser: true,
 });
 
-type Message = { role: 'user' | 'assistant'; content: string };
+// ─── Interview Modes ─────────────────────────────────────────────────────────
+
+const INTERVIEW_MODES: {
+  id: InterviewMode;
+  label: string;
+  emoji: string;
+  addendum: string;
+}[] = [
+  {
+    id: 'general',
+    label: 'General',
+    emoji: '✨',
+    addendum: '',
+  },
+  {
+    id: 'coding',
+    label: 'Coding',
+    emoji: '🖥',
+    addendum: `Interview Mode — CODING / DSA:
+- Analyze brute force first, then optimize. Always state time & space complexity (Big-O).
+- Mention edge cases: empty input, duplicates, integer overflow, null pointers.
+- Provide clean, runnable code with brief inline comments.
+- Walk through an example trace for non-trivial algorithms.`,
+  },
+  {
+    id: 'system-design',
+    label: 'System Design',
+    emoji: '🏗',
+    addendum: `Interview Mode — SYSTEM DESIGN:
+- Default to 10M+ DAU scale unless specified otherwise.
+- Cover: functional requirements, capacity estimation, high-level design, deep dives, trade-offs.
+- Cite concrete technologies (Kafka, Redis, S3, CDN, consistent hashing) where appropriate.
+- Use back-of-envelope math for capacity estimates.`,
+  },
+  {
+    id: 'behavioral',
+    label: 'Behavioral',
+    emoji: '🎭',
+    addendum: `Interview Mode — BEHAVIORAL (STAR):
+- Structure every answer: Situation → Task → Action → Result.
+- Aim for 2–3 minutes when spoken aloud (~300–400 words).
+- Emphasize leadership, ownership, conflict resolution, and measurable impact.
+- Suggest follow-up probing questions the interviewer might ask next.`,
+  },
+  {
+    id: 'debugging',
+    label: 'Debug',
+    emoji: '🐛',
+    addendum: `Interview Mode — DEBUGGING:
+- Follow: Reproduce → Isolate → Hypothesize → Verify → Fix → Prevent.
+- Ask about environment, recent deploys, logs, and reproduction steps.
+- Show methodical, systematic thinking — no random guessing.
+- Suggest monitoring or alerting improvements to prevent recurrence.`,
+  },
+  {
+    id: 'sql',
+    label: 'SQL / Data',
+    emoji: '🧮',
+    addendum: `Interview Mode — SQL & DATA:
+- Default to ANSI SQL; note dialect differences (PostgreSQL, MySQL, BigQuery) where relevant.
+- Prefer CTEs and window functions over correlated subqueries for readability.
+- Explain query plan impact: indexes, join order, GROUP BY / ORDER BY.
+- Format SQL with clear indentation and meaningful table/column aliases.`,
+  },
+];
+
+// ─── System Prompt ────────────────────────────────────────────────────────────
+
+type MsgForHistory = { role: 'user' | 'assistant'; content: string };
 
 const WELCOME =
-  "Your real-time AI interview assistant for coding rounds, system design, debugging, behavioral questions, and live problem solving.";
+  'Your real-time AI interview assistant for coding rounds, system design, debugging, behavioral questions, and live problem solving.';
 
 const DEFAULT_FOLLOW_UPS = [
   'Summarize what is on my screen',
@@ -81,7 +165,6 @@ function getLanguageInstruction(language: AppSettings['responseLanguage']): stri
       '- Do not translate programming syntax or keywords.',
     ].join('\n');
   }
-
   return [
     'Language preference:',
     '- Write the full response in clear professional English.',
@@ -95,7 +178,6 @@ function getApproachInstruction(includeApproach: boolean): string {
       '- Start with a short approach (2-4 bullets), then provide the final answer.',
     ].join('\n');
   }
-
   return [
     'Approach preference:',
     '- Skip approach and reasoning steps.',
@@ -103,16 +185,27 @@ function getApproachInstruction(includeApproach: boolean): string {
   ].join('\n');
 }
 
+function getModeAddendum(mode: InterviewMode): string {
+  return INTERVIEW_MODES.find(m => m.id === mode)?.addendum ?? '';
+}
+
 function buildSystemPrompt(settings: AppSettings): string {
-  return [
+  const parts = [
     BASE_SYSTEM_PROMPT,
     getLanguageInstruction(settings.responseLanguage),
     getApproachInstruction(settings.includeApproach),
-    '\nScreen context (OCR snapshot):\n',
-  ].join('\n\n');
+  ];
+  const modeAdd = getModeAddendum(settings.interviewMode ?? 'general');
+  if (modeAdd) parts.push(modeAdd);
+  parts.push('\nScreen context (OCR snapshot):\n');
+  return parts.join('\n\n');
 }
 
-function ipc(): { invoke: (c: string, ...a: unknown[]) => Promise<unknown>; on: (e: string, fn: () => void) => void; removeListener: (e: string, fn: () => void) => void } | null {
+function ipc(): {
+  invoke: (c: string, ...a: unknown[]) => Promise<unknown>;
+  on: (e: string, fn: () => void) => void;
+  removeListener: (e: string, fn: () => void) => void;
+} | null {
   try {
     return window.require?.('electron')?.ipcRenderer ?? null;
   } catch {
@@ -134,8 +227,13 @@ function parseFollowUpArray(raw: string): string[] {
   }
 }
 
+// ─── App ──────────────────────────────────────────────────────────────────────
+
 export default function App() {
-  const [messages, setMessages] = useState<Message[]>([{ role: 'assistant', content: WELCOME }]);
+  // ── Core chat state ────────────────────────────────────────────────────────
+  const [messages, setMessages] = useState<Message[]>([
+    { id: 'welcome', role: 'assistant', content: WELCOME },
+  ]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
@@ -150,7 +248,25 @@ export default function App() {
   const [activeSettingsSection, setActiveSettingsSection] = useState<Section>('appearance');
   const [settings, setSettings] = useState<AppSettings>(() => loadSettings());
 
-  // Apply settings before every paint (useLayoutEffect avoids flicker)
+  // ── Saved Snippets (Pins) ─────────────────────────────────────────────────
+  const [pinnedMessages, setPinnedMessages] = useState<PinnedMessage[]>(() => {
+    try {
+      const raw = localStorage.getItem(PINS_KEY);
+      return raw ? (JSON.parse(raw) as PinnedMessage[]) : [];
+    } catch { return []; }
+  });
+  const [isPinsOpen, setIsPinsOpen] = useState(false);
+  const [copiedPinId, setCopiedPinId] = useState<string | null>(null);
+
+  // ── Interview Timer ────────────────────────────────────────────────────────
+  const [timerMode, setTimerMode] = useState<'stopwatch' | 'countdown'>('stopwatch');
+  const [timerRunning, setTimerRunning] = useState(false);
+  const [timerElapsed, setTimerElapsed] = useState(0);
+  const [timerTotal, setTimerTotal] = useState(45 * 60);
+  const [showTimerPopup, setShowTimerPopup] = useState(false);
+  const timerIntervalRef = useRef<number | null>(null);
+
+  // ── Settings sync ──────────────────────────────────────────────────────────
   useLayoutEffect(() => {
     applySettings(settings);
     saveSettings(settings);
@@ -164,8 +280,28 @@ export default function App() {
     setSettings(DEFAULT_SETTINGS);
   }, []);
 
-  // Close settings on Escape handled inside SettingsPanel
+  // ── Persist pins ──────────────────────────────────────────────────────────
+  useEffect(() => {
+    try { localStorage.setItem(PINS_KEY, JSON.stringify(pinnedMessages)); } catch { /* noop */ }
+  }, [pinnedMessages]);
 
+  // ── Timer interval ────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+    if (!timerRunning) return;
+    timerIntervalRef.current = window.setInterval(() => {
+      setTimerElapsed(prev => {
+        if (timerMode === 'countdown' && prev >= timerTotal) {
+          setTimerRunning(false);
+          return timerTotal;
+        }
+        return prev + 1;
+      });
+    }, 1000);
+    return () => { if (timerIntervalRef.current) clearInterval(timerIntervalRef.current); };
+  }, [timerRunning, timerMode, timerTotal]);
+
+  // ── Panel position / resize / drag ────────────────────────────────────────
   const [pos, setPos] = useState({
     x: typeof window !== 'undefined' ? window.innerWidth - PANEL_DEFAULT_W - 24 : 24,
     y: 20,
@@ -196,8 +332,7 @@ export default function App() {
     startBoundsX: 0,
   });
   const windowBounds = useRef<WindowBounds>({
-    x: 0,
-    y: 0,
+    x: 0, y: 0,
     width: PANEL_DEFAULT_W,
     height: PANEL_DEFAULT_H,
   });
@@ -207,16 +342,16 @@ export default function App() {
   });
   const followUpReq = useRef(0);
 
-  const panelRef = useRef<HTMLDivElement>(null);
+  const panelRef       = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const videoRef       = useRef<HTMLVideoElement>(null);
+  const canvasRef      = useRef<HTMLCanvasElement>(null);
   const ocrIntervalRef = useRef<number | null>(null);
-  const latestOcr = useRef('');
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const recordingCleanupRef = useRef<(() => void) | null>(null);
-  const audioChunks = useRef<Blob[]>([]);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const latestOcr      = useRef('');
+  const mediaRecorderRef     = useRef<MediaRecorder | null>(null);
+  const recordingCleanupRef  = useRef<(() => void) | null>(null);
+  const audioChunks          = useRef<Blob[]>([]);
+  const inputRef             = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -261,11 +396,9 @@ export default function App() {
     const renderer = ipc();
     const el = panelRef.current;
     if (!renderer || !el || !IS_ELECTRON) return;
-
     const w = Math.ceil(el.offsetWidth);
     const h = Math.ceil(el.offsetHeight);
     if (w < 1 || h < 1) return;
-
     const current = (await renderer.invoke('GET_WINDOW_BOUNDS')) as WindowBounds;
     const next: WindowBounds = { x: current.x, y: current.y, width: w, height: h };
     await renderer.invoke('SET_WINDOW_BOUNDS', next);
@@ -279,9 +412,7 @@ export default function App() {
   useEffect(() => {
     const el = panelRef.current;
     if (!el || !IS_ELECTRON) return;
-    const ro = new ResizeObserver(() => {
-      void syncWindowBounds();
-    });
+    const ro = new ResizeObserver(() => { void syncWindowBounds(); });
     ro.observe(el);
     return () => ro.disconnect();
   }, [syncWindowBounds, isCollapsed]);
@@ -316,14 +447,10 @@ export default function App() {
         boundsX = b.x;
       }
       resizing.current = {
-        active: true,
-        edge,
-        startX: e.screenX,
-        startY: e.screenY,
-        startW: panelSize.width,
-        startH: panelSize.height,
-        startPosX: pos.x,
-        startBoundsX: boundsX,
+        active: true, edge,
+        startX: e.screenX, startY: e.screenY,
+        startW: panelSize.width, startH: panelSize.height,
+        startPosX: pos.x, startBoundsX: boundsX,
       };
     },
     [panelSize.height, panelSize.width, pos.x],
@@ -332,61 +459,43 @@ export default function App() {
   useEffect(() => {
     const onMove = (e: MouseEvent) => {
       const renderer = ipc();
-
       if (resizing.current.active && resizing.current.edge) {
         const { edge, startX, startY, startW, startH, startPosX, startBoundsX } = resizing.current;
         const dx = e.screenX - startX;
         const dy = e.screenY - startY;
-
-        let nextW = startW;
-        let nextH = startH;
-        let nextX = startPosX;
-        let nextBoundsX = startBoundsX;
-
+        let nextW = startW, nextH = startH, nextX = startPosX, nextBoundsX = startBoundsX;
         if (edge.includes('e')) nextW = startW + dx;
         if (edge.includes('s')) nextH = startH + dy;
-        if (edge.includes('w')) {
-          nextW = startW - dx;
-          nextBoundsX = startBoundsX + dx;
-          nextX = startPosX + dx;
-        }
-
+        if (edge.includes('w')) { nextW = startW - dx; nextBoundsX = startBoundsX + dx; nextX = startPosX + dx; }
         const clamped = clampPanelSize(nextW, nextH);
         if (edge.includes('w')) {
           const appliedDx = startW - clamped.width;
           nextBoundsX = startBoundsX + appliedDx;
           nextX = startPosX + appliedDx;
         }
-
         setPanelSize(clamped);
-
         if (renderer && IS_ELECTRON) {
           const b = windowBounds.current;
           void renderer.invoke('SET_WINDOW_BOUNDS', {
             x: edge.includes('w') ? nextBoundsX : b.x,
-            y: b.y,
-            width: clamped.width,
-            height: clamped.height,
+            y: b.y, width: clamped.width, height: clamped.height,
           });
         } else if (edge.includes('w')) {
           setPos(prev => ({ ...prev, x: Math.max(8, nextX) }));
         }
         return;
       }
-
       if (!dragging.current) return;
-
       if (renderer && IS_ELECTRON) {
         const b = windowBounds.current;
         void renderer.invoke('SET_WINDOW_BOUNDS', {
           x: e.screenX - dragOffset.current.x,
           y: e.screenY - dragOffset.current.y,
-          width: b.width,
-          height: b.height,
+          width: b.width, height: b.height,
         });
       } else {
         setPos({
-          x: Math.max(8, Math.min(window.innerWidth - panelSize.width - 8, e.clientX - dragOffset.current.x)),
+          x: Math.max(8, Math.min(window.innerWidth  - panelSize.width  - 8, e.clientX - dragOffset.current.x)),
           y: Math.max(8, Math.min(window.innerHeight - panelSize.height - 8, e.clientY - dragOffset.current.y)),
         });
       }
@@ -399,12 +508,10 @@ export default function App() {
     };
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
-    return () => {
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
-    };
+    return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
   }, [panelSize.height, panelSize.width, syncWindowBounds]);
 
+  // ── Ghost mode ────────────────────────────────────────────────────────────
   const toggleGhost = () => {
     const renderer = ipc();
     setIsGhost(prev => {
@@ -414,6 +521,7 @@ export default function App() {
     });
   };
 
+  // ── Screen OCR ────────────────────────────────────────────────────────────
   const startScanning = async () => {
     const renderer = ipc();
     if (!renderer) {
@@ -428,17 +536,12 @@ export default function App() {
           mandatory: {
             chromeMediaSource: 'desktop',
             chromeMediaSourceId: sources[0].id,
-            minWidth: 1280,
-            maxWidth: 1920,
-            minHeight: 720,
-            maxHeight: 1080,
+            minWidth: 1280, maxWidth: 1920,
+            minHeight: 720, maxHeight: 1080,
           },
         },
       } as DesktopCaptureConstraints);
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        void videoRef.current.play();
-      }
+      if (videoRef.current) { videoRef.current.srcObject = stream; void videoRef.current.play(); }
       setIsScanning(true);
       setOcrStatus('Live');
       ocrIntervalRef.current = window.setInterval(runOcr, 6000);
@@ -471,21 +574,56 @@ export default function App() {
     const imgData = canvas.toDataURL('image/jpeg', 0.8);
     try {
       const { data: { text } } = await Tesseract.recognize(imgData, 'eng');
-      if (text.trim().length > 10) {
-        latestOcr.current = text.trim();
-        setOcrStatus('Synced');
-      }
-    } catch (e) {
-      console.error('OCR error', e);
-    }
+      if (text.trim().length > 10) { latestOcr.current = text.trim(); setOcrStatus('Synced'); }
+    } catch (e) { console.error('OCR error', e); }
   };
 
+  // ── Message helpers ───────────────────────────────────────────────────────
   const addMsg = (role: 'user' | 'assistant', content: string) =>
-    setMessages(prev => [...prev, { role, content }]);
+    setMessages(prev => [...prev, { id: makeId(), role, content }]);
 
+  // ── Pin helpers ───────────────────────────────────────────────────────────
+  const pinMessage = useCallback((id: string, content: string) => {
+    setPinnedMessages(prev => {
+      if (prev.some(p => p.id === id)) return prev.filter(p => p.id !== id);
+      return [
+        { id, content, pinnedAt: Date.now(), mode: (settings.interviewMode ?? 'general') as InterviewMode },
+        ...prev,
+      ];
+    });
+  }, [settings.interviewMode]);
+
+  const isPinned = useCallback(
+    (id: string) => pinnedMessages.some(p => p.id === id),
+    [pinnedMessages],
+  );
+
+  const copyPin = useCallback(async (pin: PinnedMessage) => {
+    try {
+      await navigator.clipboard.writeText(pin.content);
+      setCopiedPinId(pin.id);
+      setTimeout(() => setCopiedPinId(null), 1500);
+    } catch { /* noop */ }
+  }, []);
+
+  // ── Timer helpers ─────────────────────────────────────────────────────────
+  const timerRemaining = Math.max(0, timerTotal - timerElapsed);
+  const timerDisplay   = timerMode === 'countdown' ? formatTimer(timerRemaining) : formatTimer(timerElapsed);
+  const isTimerWarning = timerMode === 'countdown' && timerRunning && timerRemaining <= 300 && timerRemaining > 0;
+  const isTimerFinished = timerMode === 'countdown' && timerElapsed >= timerTotal;
+
+  const resetTimer = useCallback(() => { setTimerRunning(false); setTimerElapsed(0); }, []);
+
+  const toggleTimer = useCallback(() => {
+    if (isTimerFinished) { resetTimer(); return; }
+    setTimerRunning(r => !r);
+  }, [isTimerFinished, resetTimer]);
+
+  // ── Follow-ups ────────────────────────────────────────────────────────────
   const fetchFollowUps = useCallback(async (assistantText: string, userText: string): Promise<string[]> => {
     const key = import.meta.env.VITE_GROQ_API_KEY;
     if (!key) return [...DEFAULT_FOLLOW_UPS];
+    const currentMode = INTERVIEW_MODES.find(m => m.id === (settings.interviewMode ?? 'general'));
     try {
       const completion = await groq.chat.completions.create({
         model: 'llama-3.3-70b-versatile',
@@ -494,10 +632,10 @@ export default function App() {
         messages: [
           {
             role: 'system',
-            content:
-              `Reply with ONLY a JSON array of exactly 3 short follow-up questions (strings) the user might ask next in an interview prep chat.
+            content: `Reply with ONLY a JSON array of exactly 3 short follow-up questions (strings) the user might ask next in an interview prep chat.
 No markdown, no keys, no explanation — only the JSON array.
 Language: ${settings.responseLanguage === 'hinglish' ? 'Hinglish (Roman script)' : 'English'}.
+Interview mode: ${currentMode?.label ?? 'General'}.
 Keep any code words and technical identifiers in proper English.`,
           },
           {
@@ -508,16 +646,15 @@ Keep any code words and technical identifiers in proper English.`,
       });
       const raw = completion.choices[0]?.message?.content ?? '';
       let next = parseFollowUpArray(raw);
-      if (next.length < 3) {
-        next = [...next, ...DEFAULT_FOLLOW_UPS].slice(0, 3);
-      }
+      if (next.length < 3) next = [...next, ...DEFAULT_FOLLOW_UPS].slice(0, 3);
       return next;
     } catch (e) {
       console.error(e);
       return [...DEFAULT_FOLLOW_UPS];
     }
-  }, [settings.responseLanguage]);
+  }, [settings.responseLanguage, settings.interviewMode]);
 
+  // ── Send message ──────────────────────────────────────────────────────────
   const sendMessage = useCallback(
     async (text: string) => {
       const trimmed = text.trim();
@@ -527,10 +664,8 @@ Keep any code words and technical identifiers in proper English.`,
       addMsg('user', trimmed);
       setInput('');
       setIsLoading(true);
-
       try {
-        const history = [...messages, { role: 'user' as const, content: trimmed }].slice(-12);
-
+        const history: MsgForHistory[] = [...messages, { role: 'user' as const, content: trimmed }].slice(-12);
         const completion = await groq.chat.completions.create({
           model: 'llama-3.3-70b-versatile',
           temperature: 0.3,
@@ -540,17 +675,12 @@ Keep any code words and technical identifiers in proper English.`,
             ...history.map(m => ({ role: m.role, content: m.content })),
           ],
         });
-
         const reply = completion.choices[0]?.message?.content ?? "I couldn't generate a response.";
         addMsg('assistant', reply);
-
         const req = ++followUpReq.current;
         setFollowUpsLoading(true);
         const lines = await fetchFollowUps(reply, trimmed);
-        if (followUpReq.current === req) {
-          setFollowUps(lines);
-          setFollowUpsLoading(false);
-        }
+        if (followUpReq.current === req) { setFollowUps(lines); setFollowUpsLoading(false); }
       } catch (err) {
         console.error(err);
         addMsg('assistant', '**Connection error** — add your `VITE_GROQ_API_KEY` to `.env` and restart.');
@@ -565,25 +695,20 @@ Keep any code words and technical identifiers in proper English.`,
   const clearChat = () => {
     followUpReq.current += 1;
     setFollowUpsLoading(false);
-    setMessages([{ role: 'assistant', content: 'Fresh slate. Fire away — technical, behavioral, or system design.' }]);
+    setMessages([{ id: makeId(), role: 'assistant', content: 'Fresh slate. Fire away — technical, behavioral, or system design.' }]);
     setFollowUps(DEFAULT_FOLLOW_UPS);
   };
 
+  // ── Voice recording ───────────────────────────────────────────────────────
   const toggleRecording = async () => {
-    if (isRecording) {
-      mediaRecorderRef.current?.stop();
-      setIsRecording(false);
-      return;
-    }
+    if (isRecording) { mediaRecorderRef.current?.stop(); setIsRecording(false); return; }
     try {
       const { stream, cleanup } = await createRecordingCapture(ipc());
       recordingCleanupRef.current = cleanup;
       const mr = new MediaRecorder(stream);
       mediaRecorderRef.current = mr;
       audioChunks.current = [];
-      mr.ondataavailable = e => {
-        if (e.data.size > 0) audioChunks.current.push(e.data);
-      };
+      mr.ondataavailable = e => { if (e.data.size > 0) audioChunks.current.push(e.data); };
       mr.onstop = async () => {
         recordingCleanupRef.current?.();
         recordingCleanupRef.current = null;
@@ -596,9 +721,7 @@ Keep any code words and technical identifiers in proper English.`,
         } catch (err) {
           console.error(err);
           addMsg('assistant', 'Could not transcribe audio — try again or type your question.');
-        } finally {
-          setIsLoading(false);
-        }
+        } finally { setIsLoading(false); }
       };
       mr.start();
       setIsRecording(true);
@@ -608,6 +731,7 @@ Keep any code words and technical identifiers in proper English.`,
     }
   };
 
+  // ── Shell styles ──────────────────────────────────────────────────────────
   const expandedShellStyle: React.CSSProperties = IS_ELECTRON
     ? { width: panelSize.width, height: panelSize.height }
     : { left: pos.x, top: pos.y, width: panelSize.width, height: panelSize.height };
@@ -616,25 +740,30 @@ Keep any code words and technical identifiers in proper English.`,
     ? { width: 'max-content', height: COLLAPSED_H }
     : { left: pos.x, top: pos.y, width: 'max-content', height: COLLAPSED_H };
 
+  // ── Collapsed state ───────────────────────────────────────────────────────
   if (isCollapsed) {
     return (
       <>
-        <div
-          ref={panelRef}
-          className="copilot-shell copilot-shell--collapsed z-50"
-          style={collapsedShellStyle}
-        >
+        <div ref={panelRef} className="copilot-shell copilot-shell--collapsed z-50" style={collapsedShellStyle}>
           <div
             className="collapsed-bar flex items-center gap-2 px-3.5 h-full cursor-grab active:cursor-grabbing select-none"
             onMouseDown={onDragStart}
           >
-            <div className="w-7 h-7 rounded-lg avatar-ring flex items-center justify-center shrink-0">
-              <Sparkles className="w-3.5 h-3.5 text-blue-300" />
-            </div>
             <span className="text-[13px] font-semibold text-[var(--text)] tracking-tight whitespace-nowrap">
-              Copilot
+              Interview Copilot
             </span>
             {isScanning && <span className="status-pill shrink-0">{ocrStatus}</span>}
+            {/* Timer pill visible in collapsed state */}
+            {(timerRunning || timerElapsed > 0) && (
+              <span
+                className={`timer-collapsed-pill shrink-0 ${isTimerWarning ? 'timer-warning' : ''} ${isTimerFinished ? 'timer-finished' : ''}`}
+                onClick={toggleTimer}
+                title={timerRunning ? 'Pause timer' : 'Resume timer'}
+                style={{ cursor: 'pointer' }}
+              >
+                {timerDisplay}
+              </span>
+            )}
             <button
               type="button"
               onClick={e => { e.stopPropagation(); handleExpand(); }}
@@ -651,6 +780,7 @@ Keep any code words and technical identifiers in proper English.`,
     );
   }
 
+  // ── Expanded state ────────────────────────────────────────────────────────
   return (
     <>
       <div
@@ -662,263 +792,305 @@ Keep any code words and technical identifiers in proper English.`,
       >
         <div className="copilot-panel relative h-full">
           <div className="copilot-panel-inner">
-          <div
-            className="title-bar flex items-center justify-between px-4 py-3 cursor-grab active:cursor-grabbing select-none shrink-0"
-            onMouseDown={onDragStart}
-          >
-            <div className="flex items-center gap-2.5 min-w-0">
-              <div className="min-w-0">
+
+            {/* ── Title Bar ──────────────────────────────── */}
+            <div
+              className="title-bar flex items-center px-4 py-2.5 cursor-grab active:cursor-grabbing select-none shrink-0 gap-2"
+              onMouseDown={onDragStart}
+            >
+              {/* Left: branding */}
+              <div className="flex-1 min-w-0">
                 <p className="text-[14px] font-bold text-[var(--text)] tracking-tight leading-none truncate">
                   Interview Copilot
                 </p>
-                <p className="text-[10px] text-[var(--text-muted)] mt-0.5 font-medium">⌘⇧Space hide · ⌘⇧G ghost</p>
+                <div className="flex items-center gap-2 mt-0.5">
+                  <span className="text-[10px] text-[var(--text-muted)] font-medium">⌘⇧Space · ⌘⇧G</span>
+                  {isScanning && <span className="status-pill">{ocrStatus}</span>}
+                </div>
               </div>
-              {isScanning && (
-                <span className="status-pill shrink-0">{ocrStatus}</span>
-              )}
-            </div>
-            <div className="flex items-center gap-0.5 shrink-0" onMouseDown={e => e.stopPropagation()}>
-              <button
-                type="button"
-                onClick={toggleGhost}
-                title={isGhost ? 'Disable Ghost Mode (⌘⇧G)' : 'Ghost Mode — click-through (⌘⇧G)'}
-                className={`icon-btn ${isGhost ? 'icon-btn--active' : ''}`}
-              >
-                {isGhost ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
-              </button>
-              <button
-                type="button"
-                onClick={isScanning ? stopScanning : startScanning}
-                title={isScanning ? 'Stop Screen Context' : 'Start Screen Context'}
-                className={`icon-btn ${isScanning ? 'icon-btn--active' : ''}`}
-              >
-                <Monitor className="w-4 h-4" />
-              </button>
-              <button type="button" onClick={clearChat} title="Clear chat" className="icon-btn icon-btn--danger">
-                <Trash2 className="w-4 h-4" />
-              </button>
-              <button
-                type="button"
-                onClick={() => { setIsSettingsOpen(prev => !prev); setActiveSettingsSection('appearance'); }}
-                title="Settings"
-                className={`icon-btn ${isSettingsOpen ? 'icon-btn--active' : ''}`}
-              >
-                <Settings className="w-4 h-4" />
-              </button>
-              <button
-                type="button"
-                onClick={handleCollapse}
-                title="Collapse"
-                className="icon-btn"
-              >
-                <ChevronUp className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
 
-          <div
-            className="flex-1 min-h-0 overflow-y-auto px-4 scrollbar-hide"
-            style={{
-              paddingTop: settings.compactMode ? 8 : 16,
-              paddingBottom: settings.compactMode ? 8 : 16,
-            }}
-          >
+              {/* Center: Timer widget */}
+              <div
+                className="flex items-center gap-1 shrink-0"
+                onMouseDown={e => e.stopPropagation()}
+              >
+                <div className="relative">
+                  <button
+                    type="button"
+                    className={`timer-display-btn ${isTimerWarning ? 'timer-warning' : ''} ${isTimerFinished ? 'timer-finished' : ''}`}
+                    onClick={() => setShowTimerPopup(p => !p)}
+                    title="Timer settings"
+                  >
+                    <Timer className="w-3 h-3 opacity-70 shrink-0" />
+                    <span className="timer-display-text">{timerDisplay}</span>
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  onClick={toggleTimer}
+                  className={`icon-btn shrink-0 ${timerRunning ? 'icon-btn--active' : ''}`}
+                  title={timerRunning ? 'Pause timer' : isTimerFinished ? 'Restart timer' : 'Start timer'}
+                >
+                  {timerRunning
+                    ? <Pause className="w-3.5 h-3.5" />
+                    : <Play className="w-3.5 h-3.5" />}
+                </button>
+              </div>
+
+              {/* Right: actions */}
+              <div className="flex items-center gap-0.5 shrink-0" onMouseDown={e => e.stopPropagation()}>
+                <button
+                  type="button"
+                  onClick={toggleGhost}
+                  title={isGhost ? 'Disable Ghost Mode (⌘⇧G)' : 'Ghost Mode — click-through (⌘⇧G)'}
+                  className={`icon-btn ${isGhost ? 'icon-btn--active' : ''}`}
+                >
+                  {isGhost ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+                </button>
+                <button
+                  type="button"
+                  onClick={isScanning ? stopScanning : startScanning}
+                  title={isScanning ? 'Stop Screen Context' : 'Start Screen Context'}
+                  className={`icon-btn ${isScanning ? 'icon-btn--active' : ''}`}
+                >
+                  <Monitor className="w-4 h-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setIsPinsOpen(p => !p); setIsSettingsOpen(false); }}
+                  title={`Saved snippets (${pinnedMessages.length})`}
+                  className={`icon-btn relative ${isPinsOpen ? 'icon-btn--active' : ''}`}
+                >
+                  <Bookmark className="w-4 h-4" />
+                  {pinnedMessages.length > 0 && (
+                    <span className="pin-badge">{pinnedMessages.length > 9 ? '9+' : pinnedMessages.length}</span>
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={clearChat}
+                  title="Clear chat"
+                  className="icon-btn icon-btn--danger"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setIsSettingsOpen(prev => !prev); setIsPinsOpen(false); setActiveSettingsSection('appearance'); }}
+                  title="Settings"
+                  className={`icon-btn ${isSettingsOpen ? 'icon-btn--active' : ''}`}
+                >
+                  <Settings className="w-4 h-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCollapse}
+                  title="Collapse"
+                  className="icon-btn"
+                >
+                  <ChevronUp className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            {/* ── Interview Mode Strip ────────────────────── */}
+            <div className="mode-strip" onMouseDown={e => e.stopPropagation()}>
+              {INTERVIEW_MODES.map(mode => (
+                <button
+                  key={mode.id}
+                  type="button"
+                  className={`mode-chip ${(settings.interviewMode ?? 'general') === mode.id ? 'mode-chip--active' : ''}`}
+                  onClick={() => handleSettingsChange({ ...settings, interviewMode: mode.id })}
+                  title={mode.label}
+                >
+                  <span>{mode.label}</span>
+                </button>
+              ))}
+            </div>
+
+            {/* ── Messages ────────────────────────────────── */}
             <div
+              className="flex-1 min-h-0 overflow-y-auto px-4 scrollbar-hide"
               style={{
-                display: 'flex',
-                flexDirection: 'column',
-                gap: settings.messageSpacing === 'compact' ? 8 : settings.messageSpacing === 'relaxed' ? 20 : 14,
+                paddingTop: settings.compactMode ? 8 : 16,
+                paddingBottom: settings.compactMode ? 8 : 16,
               }}
             >
-              {messages.map((msg, idx) => (
-                <motion.div
-                  key={idx}
-                  initial={{ opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.2, ease: 'easeOut' }}
-                  className={`flex gap-2.5 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
-                >
-                  {msg.role === 'assistant' && settings.showAvatars && (
-                    <div className="w-8 h-8 rounded-xl avatar-ring flex items-center justify-center shrink-0 mt-0.5">
-                      <Fan className="w-4 h-4 text-blue-300" />
-                    </div>
-                  )}
-                  <div
-                    className={`max-w-[85%] px-3.5 py-2.5 ${
-                      msg.role === 'user' ? 'msg-bubble--user' : 'msg-bubble--assistant'
-                    }`}
-                  >
-                    <MessageContent content={msg.content} variant={msg.role} />
-                    {settings.showTimestamps && (
-                      <p style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 4, opacity: 0.6 }}>
-                        {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                      </p>
-                    )}
-                  </div>
-                </motion.div>
-              ))}
-
-              {isLoading && (
-                <motion.div
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  className={`flex items-center gap-2.5 ${settings.showAvatars ? 'pl-10' : 'pl-0'}`}
-                >
-                  <div className="flex gap-1.5">
-                    {[0, 1, 2].map(i => (
-                      <div
-                        key={i}
-                        className="think-dot"
-                        style={{ animation: `think-bounce 0.9s ${i * 0.14}s infinite` }}
-                      />
-                    ))}
-                  </div>
-                  <span className="text-xs text-[var(--text-muted)] font-medium">Synthesizing…</span>
-                </motion.div>
-              )}
-
-              <div ref={messagesEndRef} />
-            </div>
-          </div>
-
-          <div className="px-4 border-t border-[var(--panel-border)]" onMouseDown={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between gap-2 py-2">
-              <div className="flex items-center gap-2 min-w-0">
-                <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--text-muted)]">
-                  Smart follow-ups
-                </p>
-                {followUpsLoading && (
-                  <Loader2 className="w-3.5 h-3.5 text-blue-400 animate-spin shrink-0" />
-                )}
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsFollowUpsExpanded(prev => !prev)}
-                title={isFollowUpsExpanded ? 'Minimize follow-ups' : 'Maximize follow-ups'}
-                className="icon-btn shrink-0"
-                aria-expanded={isFollowUpsExpanded}
-                aria-label={isFollowUpsExpanded ? 'Minimize follow-ups' : 'Maximize follow-ups'}
+              <div
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: settings.messageSpacing === 'compact' ? 8 : settings.messageSpacing === 'relaxed' ? 20 : 14,
+                }}
               >
-                {isFollowUpsExpanded ? (
-                  <ChevronUp className="w-4 h-4" />
-                ) : (
-                  <ChevronDown className="w-4 h-4" />
-                )}
-              </button>
-            </div>
-
-            <AnimatePresence initial={false}>
-              {isFollowUpsExpanded && (
-                <motion.div
-                  key="followups-body"
-                  initial={{ height: 0, opacity: 0 }}
-                  animate={{ height: 'auto', opacity: 1 }}
-                  exit={{ height: 0, opacity: 0 }}
-                  transition={{ duration: 0.22, ease: 'easeInOut' }}
-                  className="overflow-hidden pb-2"
-                >
-                  <div className="flex gap-3 mb-3">
-                    <div className="flex-1 min-w-0 flex flex-col gap-1">
-                      {followUps.map((line, i) => (
+                {messages.map(msg => (
+                  <motion.div
+                    key={msg.id}
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.2, ease: 'easeOut' }}
+                    className={`flex gap-2.5 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                  >
+                    {msg.role === 'assistant' && settings.showAvatars && (
+                      <div className="w-8 h-8 rounded-xl avatar-ring flex items-center justify-center shrink-0 mt-0.5">
+                        <Fan className="w-4 h-4 text-blue-300" />
+                      </div>
+                    )}
+                    <div
+                      className={`max-w-[85%] px-3.5 py-2.5 group relative ${
+                        msg.role === 'user' ? 'msg-bubble--user' : 'msg-bubble--assistant'
+                      }`}
+                    >
+                      <MessageContent content={msg.content} variant={msg.role} />
+                      {settings.showTimestamps && (
+                        <p style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 4, opacity: 0.6 }}>
+                          {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </p>
+                      )}
+                      {/* ── Pin button — assistant messages only ── */}
+                      {msg.role === 'assistant' && msg.id !== 'welcome' && (
                         <button
-                          key={`${line}-${i}`}
                           type="button"
-                          disabled={isLoading || followUpsLoading}
-                          onClick={() => void sendMessage(line)}
-                          className={`followup-btn ${
-                            i === 0
-                              ? 'text-[var(--text)] font-semibold text-[13px]'
-                              : 'text-[var(--text-muted)] font-medium text-[12px]'
-                          }`}
+                          className={`pin-msg-btn ${isPinned(msg.id) ? 'pin-msg-btn--pinned' : ''}`}
+                          onClick={() => pinMessage(msg.id, msg.content)}
+                          title={isPinned(msg.id) ? 'Remove from saved snippets' : 'Save snippet'}
                         >
-                          <span className="text-blue-400/60 mr-0.5">→</span>
-                          {line}
+                          {isPinned(msg.id)
+                            ? <Bookmark className="w-3 h-3" />
+                            : <BookmarkPlus className="w-3 h-3" />}
                         </button>
+                      )}
+                    </div>
+                  </motion.div>
+                ))}
+
+                {isLoading && (
+                  <motion.div
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    className={`flex items-center gap-2.5 ${settings.showAvatars ? 'pl-10' : 'pl-0'}`}
+                  >
+                    <div className="flex gap-1.5">
+                      {[0, 1, 2].map(i => (
+                        <div
+                          key={i}
+                          className="think-dot"
+                          style={{ animation: `think-bounce 0.9s ${i * 0.14}s infinite` }}
+                        />
                       ))}
                     </div>
-                  </div>
+                    <span className="text-xs text-[var(--text-muted)] font-medium">Synthesizing…</span>
+                  </motion.div>
+                )}
 
-                  <div className="flex gap-2">
-                    <button type="button" onClick={clearChat} className="action-btn action-btn--secondary">
-                      Start over
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => { inputRef.current?.focus(); }}
-                      className="action-btn action-btn--primary"
-                    >
-                      Ask another
-                    </button>
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
+                <div ref={messagesEndRef} />
+              </div>
+            </div>
 
-          <div
-            className="composer-bar px-4 pb-4 pt-3 flex items-center gap-2 border-t border-[var(--panel-border)]"
-            onMouseDown={e => e.stopPropagation()}
-          >
-            <button
-              type="button"
-              onClick={toggleRecording}
-              title={isRecording ? 'Stop recording' : 'Voice input'}
-              className={`mic-btn shrink-0 ${isRecording ? 'mic-btn--recording' : ''}`}
+            {/* ── Smart Follow-ups ─────────────────────────── */}
+            <div className="px-4 border-t border-[var(--panel-border)]" onMouseDown={e => e.stopPropagation()}>
+              <div className="flex items-center justify-between gap-2 py-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--text-muted)]">
+                    Smart follow-ups
+                  </p>
+                  {followUpsLoading && (
+                    <Loader2 className="w-3.5 h-3.5 text-blue-400 animate-spin shrink-0" />
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsFollowUpsExpanded(prev => !prev)}
+                  title={isFollowUpsExpanded ? 'Minimize follow-ups' : 'Maximize follow-ups'}
+                  className="icon-btn shrink-0"
+                  aria-expanded={isFollowUpsExpanded}
+                >
+                  {isFollowUpsExpanded
+                    ? <ChevronUp className="w-4 h-4" />
+                    : <ChevronDown className="w-4 h-4" />}
+                </button>
+              </div>
+
+              <AnimatePresence initial={false}>
+                {isFollowUpsExpanded && (
+                  <motion.div
+                    key="followups-body"
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: 'auto', opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.22, ease: 'easeInOut' }}
+                    className="overflow-hidden pb-2"
+                  >
+                    <div className="flex gap-3 mb-3">
+                      <div className="flex-1 min-w-0 flex flex-col gap-1">
+                        {followUps.map((line, i) => (
+                          <button
+                            key={`${line}-${i}`}
+                            type="button"
+                            disabled={isLoading || followUpsLoading}
+                            onClick={() => void sendMessage(line)}
+                            className={`followup-btn ${
+                              i === 0
+                                ? 'text-[var(--text)] font-semibold text-[13px]'
+                                : 'text-[var(--text-muted)] font-medium text-[12px]'
+                            }`}
+                          >
+                            <span className="text-blue-400/60 mr-0.5">→</span>
+                            {line}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+
+            {/* ── Composer ─────────────────────────────────── */}
+            <div
+              className="composer-bar px-4 pb-4 pt-3 flex items-center gap-2 border-t border-[var(--panel-border)]"
+              onMouseDown={e => e.stopPropagation()}
             >
-              {isRecording ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
-            </button>
-
-            <input
-              ref={inputRef}
-              type="text"
-              value={input}
-              onChange={e => setInput(e.target.value)}
-              onKeyDown={e => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  void sendMessage(input);
-                }
-              }}
-              placeholder={isRecording ? 'Listening… tap mic to finish' : 'Ask anything — code, design, behavior…'}
-              disabled={isRecording || isLoading}
-              className="input-field flex-1 disabled:opacity-50"
-            />
-
-            <button
-              type="button"
-              onClick={() => void sendMessage(input)}
-              disabled={!input.trim() || isLoading || isRecording}
-              title="Send"
-              className="send-btn shrink-0"
-            >
-              <Send className="w-4 h-4" />
-            </button>
+              <button
+                type="button"
+                onClick={toggleRecording}
+                title={isRecording ? 'Stop recording' : 'Voice input'}
+                className={`mic-btn shrink-0 ${isRecording ? 'mic-btn--recording' : ''}`}
+              >
+                {isRecording ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+              </button>
+              <input
+                ref={inputRef}
+                type="text"
+                value={input}
+                onChange={e => setInput(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void sendMessage(input); }
+                }}
+                placeholder={isRecording ? 'Listening… tap mic to finish' : 'Ask anything — code, design, behavior…'}
+                disabled={isRecording || isLoading}
+                className="input-field flex-1 disabled:opacity-50"
+              />
+              <button
+                type="button"
+                onClick={() => void sendMessage(input)}
+                disabled={!input.trim() || isLoading || isRecording}
+                title="Send"
+                className="send-btn shrink-0"
+              >
+                <Send className="w-4 h-4" />
+              </button>
+            </div>
           </div>
-          </div>
 
-          <div
-            className="resize-handle resize-handle--w"
-            onMouseDown={e => void onResizeStart('w', e)}
-            aria-hidden
-          />
-          <div
-            className="resize-handle resize-handle--e"
-            onMouseDown={e => void onResizeStart('e', e)}
-            aria-hidden
-          />
-          <div
-            className="resize-handle resize-handle--s"
-            onMouseDown={e => void onResizeStart('s', e)}
-            aria-hidden
-          />
-          <div
-            className="resize-handle resize-handle--se"
-            onMouseDown={e => void onResizeStart('se', e)}
-            aria-hidden
-          />
+          {/* ── Resize handles ────────────────────────────── */}
+          <div className="resize-handle resize-handle--w" onMouseDown={e => void onResizeStart('w', e)} aria-hidden />
+          <div className="resize-handle resize-handle--e" onMouseDown={e => void onResizeStart('e', e)} aria-hidden />
+          <div className="resize-handle resize-handle--s" onMouseDown={e => void onResizeStart('s', e)} aria-hidden />
+          <div className="resize-handle resize-handle--se" onMouseDown={e => void onResizeStart('se', e)} aria-hidden />
         </div>
 
-        {/* Settings Panel — outside overflow:hidden so it renders freely */}
+        {/* ── Settings Panel ────────────────────────────── */}
         <SettingsPanel
           open={isSettingsOpen}
           settings={settings}
@@ -929,6 +1101,156 @@ Keep any code words and technical identifiers in proper English.`,
           onReset={handleSettingsReset}
         />
 
+        {/* ── Timer Popup ───────────────────────────────── */}
+        <AnimatePresence>
+          {showTimerPopup && (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.93, y: -6 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.93, y: -6 }}
+              transition={{ duration: 0.15, ease: 'easeOut' }}
+              className="timer-popup"
+              onMouseDown={e => e.stopPropagation()}
+            >
+              <p className="timer-popup-label">Timer Mode</p>
+              <div className="timer-mode-row">
+                <button
+                  className={`timer-mode-btn ${timerMode === 'stopwatch' ? 'timer-mode-btn--active' : ''}`}
+                  onClick={() => { setTimerMode('stopwatch'); resetTimer(); }}
+                >
+                  Stopwatch
+                </button>
+                <button
+                  className={`timer-mode-btn ${timerMode === 'countdown' ? 'timer-mode-btn--active' : ''}`}
+                  onClick={() => { setTimerMode('countdown'); resetTimer(); }}
+                >
+                  Countdown
+                </button>
+              </div>
+
+              {timerMode === 'countdown' && (
+                <>
+                  <p className="timer-popup-label" style={{ marginTop: 10 }}>Duration</p>
+                  <div className="timer-presets">
+                    {[15, 30, 45, 60].map(min => (
+                      <button
+                        key={min}
+                        className={`timer-preset-btn ${timerTotal === min * 60 ? 'timer-preset-btn--active' : ''}`}
+                        onClick={() => { setTimerTotal(min * 60); resetTimer(); }}
+                      >
+                        {min}m
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+
+              <div className="timer-controls">
+                <button className="timer-ctrl-btn" onClick={toggleTimer}>
+                  {timerRunning
+                    ? <><Pause className="w-3 h-3" /> Pause</>
+                    : isTimerFinished
+                      ? <><RotateCcw className="w-3 h-3" /> Restart</>
+                      : <><Play className="w-3 h-3" /> Start</>}
+                </button>
+                <button className="timer-ctrl-btn timer-ctrl-btn--reset" onClick={resetTimer} title="Reset">
+                  <RotateCcw className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* ── Pins Panel ────────────────────────────────── */}
+        <AnimatePresence>
+          {isPinsOpen && (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.96, y: -8 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.96, y: -8 }}
+              transition={{ duration: 0.18, ease: 'easeOut' }}
+              className="pins-panel"
+              onMouseDown={e => e.stopPropagation()}
+            >
+              {/* Header */}
+              <div className="pins-header">
+                <div className="pins-title">
+                  <div className="pins-title-icon">
+                    <Bookmark className="w-3.5 h-3.5" />
+                  </div>
+                  <span>Saved Snippets</span>
+                  {pinnedMessages.length > 0 && (
+                    <span className="pins-count">{pinnedMessages.length}</span>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsPinsOpen(false)}
+                  className="settings-close-btn"
+                  title="Close"
+                >
+                  <ChevronUp className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
+              {/* Body */}
+              <div className="pins-body">
+                {pinnedMessages.length === 0 ? (
+                  <div className="pins-empty">
+                    <BookmarkPlus className="w-8 h-8 opacity-20" />
+                    <p>No saved snippets yet</p>
+                    <p className="pins-empty-sub">
+                      Hover over any AI response and click the bookmark icon to save it here.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="snippets-list">
+                    {pinnedMessages.map(pin => {
+                      const modeInfo = INTERVIEW_MODES.find(m => m.id === pin.mode);
+                      return (
+                        <div key={pin.id} className="snippet-card">
+                          <div className="snippet-meta">
+                            {modeInfo && (
+                              <span className="snippet-mode">
+                                {modeInfo.emoji} {modeInfo.label}
+                              </span>
+                            )}
+                            <span className="snippet-time">
+                              {new Date(pin.pinnedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                          </div>
+                          <p className="snippet-preview">
+                            {pin.content.slice(0, 140)}{pin.content.length > 140 ? '…' : ''}
+                          </p>
+                          <div className="snippet-actions">
+                            <button
+                              type="button"
+                              className="snippet-copy-btn"
+                              onClick={() => void copyPin(pin)}
+                              title="Copy to clipboard"
+                            >
+                              {copiedPinId === pin.id
+                                ? <><Check className="w-3 h-3" /> Copied!</>
+                                : <><Copy className="w-3 h-3" /> Copy</>}
+                            </button>
+                            <button
+                              type="button"
+                              className="snippet-delete-btn"
+                              onClick={() => pinMessage(pin.id, pin.content)}
+                              title="Remove snippet"
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
 
       <video ref={videoRef} className="hidden" muted playsInline />

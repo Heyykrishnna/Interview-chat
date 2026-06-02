@@ -16,6 +16,7 @@ export type Theme =
 export type FontFamily = 'plus-jakarta' | 'inter' | 'outfit' | 'geist' | 'mono';
 export type Section = 'appearance' | 'typography' | 'layout' | 'advanced';
 export type ResponseLanguage = 'english' | 'hinglish';
+export type InterviewMode = 'general' | 'coding' | 'system-design' | 'behavioral' | 'debugging' | 'sql';
 
 export interface AppSettings {
   theme: Theme;
@@ -31,6 +32,7 @@ export interface AppSettings {
   accentColor: string;
   responseLanguage: ResponseLanguage;
   includeApproach: boolean;
+  interviewMode: InterviewMode;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -47,6 +49,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   accentColor: '#2563eb',
   responseLanguage: 'english',
   includeApproach: true,
+  interviewMode: 'general',
 };
 
 // ─── Theme & Font Definitions ─────────────────────────────────────────────────
