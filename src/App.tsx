@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback, useLayoutEffect } from 'react
 import {
   Mic, Monitor, EyeOff, Send, MicOff, Trash2,
   ChevronDown, ChevronUp, Eye, Loader2, Fan, Settings,
-  BookmarkPlus, Bookmark, Timer, Copy, Check, Play, Pause, RotateCcw,
+  BookmarkPlus, Bookmark, Timer, Copy, Check, Play, Pause, RotateCcw, Cpu,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Tesseract from 'tesseract.js';
@@ -20,6 +20,10 @@ import {
   type InterviewMode,
 } from './components/Settings';
 import type { AppSettings } from './components/Settings';
+import {
+  SystemDesignWhiteboard,
+  type SystemDesignData,
+} from './components/SystemDesignWhiteboard';
 
 const PANEL_DEFAULT_W = 440;
 const PANEL_DEFAULT_H = 540;
@@ -247,6 +251,11 @@ export default function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [activeSettingsSection, setActiveSettingsSection] = useState<Section>('appearance');
   const [settings, setSettings] = useState<AppSettings>(() => loadSettings());
+
+  // ── System Design Whiteboard ──────────────────────────────────────────────
+  const [isWhiteboardOpen, setIsWhiteboardOpen] = useState(false);
+  const [whiteboardData, setWhiteboardData] = useState<SystemDesignData | null>(null);
+  const [whiteboardLoading, setWhiteboardLoading] = useState(false);
 
   // ── Saved Snippets (Pins) ─────────────────────────────────────────────────
   const [pinnedMessages, setPinnedMessages] = useState<PinnedMessage[]>(() => {
@@ -654,11 +663,92 @@ Keep any code words and technical identifiers in proper English.`,
     }
   }, [settings.responseLanguage, settings.interviewMode]);
 
+  // ── System Design Generator ───────────────────────────────────────────────
+  const generateSystemDesign = useCallback(async (system: string) => {
+    const key = import.meta.env.VITE_GROQ_API_KEY;
+    if (!key) {
+      addMsg('assistant', '**API key missing** — add `VITE_GROQ_API_KEY` to `.env` to use the Whiteboard.');
+      return;
+    }
+    setIsWhiteboardOpen(true);
+    setWhiteboardLoading(true);
+    setWhiteboardData(null);
+    try {
+      const completion = await groq.chat.completions.create({
+        model: 'llama-3.3-70b-versatile',
+        temperature: 0.25,
+        max_completion_tokens: 3000,
+        messages: [
+          {
+            role: 'system',
+            content: `You are a staff-level distributed systems architect. Generate a complete system design for the given product.
+Return ONLY a single valid JSON object — no markdown, no prose, no code fences. The JSON must exactly match this schema:
+{
+  "system": "string — product name",
+  "overview": "string — 3-4 sentence executive summary covering purpose, scale, and core technical decisions",
+  "diagram": "string — an ASCII art architecture diagram using box-drawing chars (┌─┐└┘│├┤┬┴┼▶◀) showing the main components and data flow, at least 20 lines",
+  "apis": [
+    {
+      "method": "GET|POST|PUT|DELETE|PATCH|WS",
+      "endpoint": "/path/to/resource",
+      "payload": "optional — JSON shape or description",
+      "response": "optional — JSON shape or description",
+      "description": "one sentence explaining what this endpoint does"
+    }
+  ],
+  "database": [
+    {
+      "table": "table_name",
+      "engine": "e.g. PostgreSQL / Cassandra / Redis / DynamoDB / MongoDB",
+      "columns": [
+        { "name": "col_name", "type": "data type", "note": "optional — PK / FK / index / partition key" }
+      ],
+      "indexes": ["index_name (optional)"],
+      "note": "optional — one sentence on why this storage was chosen"
+    }
+  ],
+  "scaling": {
+    "dau": "e.g. 2B",
+    "storage": "e.g. 4.5 PB/year",
+    "bandwidth": "e.g. 100 Gbps peak",
+    "qps": "e.g. 500K reads/sec",
+    "strategies": ["list of 6-8 concrete scaling strategies with specific numbers"],
+    "technologies": ["list of 8-12 specific technology names"],
+    "tradeoffs": ["list of 3-5 concrete trade-offs with reasoning"]
+  }
+}
+Include at least 6 API endpoints, 4 database tables, and make all numbers realistic for production scale.`,
+          },
+          { role: 'user', content: `Design ${system}` },
+        ],
+      });
+      const raw = completion.choices[0]?.message?.content ?? '';
+      // Strip any accidental markdown code fences
+      const stripped = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+      const parsed = JSON.parse(stripped) as SystemDesignData;
+      setWhiteboardData(parsed);
+    } catch (err) {
+      console.error('Whiteboard error:', err);
+      addMsg('assistant', `**Whiteboard error** — could not generate design for "${system}". Try again or check your API key.`);
+      setIsWhiteboardOpen(false);
+    } finally {
+      setWhiteboardLoading(false);
+    }
+  }, []);
+
   // ── Send message ──────────────────────────────────────────────────────────
   const sendMessage = useCallback(
     async (text: string) => {
       const trimmed = text.trim();
       if (!trimmed || isLoading) return;
+
+      // ── Intercept "Design X" / "Architect X" commands ──────────────────────
+      const designMatch = trimmed.match(/^(?:design|architect|whiteboard)\s+(.+)/i);
+      if (designMatch) {
+        await generateSystemDesign(designMatch[1].trim());
+        setInput('');
+        return;
+      }
       followUpReq.current += 1;
       setFollowUpsLoading(false);
       addMsg('user', trimmed);
@@ -873,6 +963,18 @@ Keep any code words and technical identifiers in proper English.`,
                   className="icon-btn icon-btn--danger"
                 >
                   <Trash2 className="w-4 h-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsWhiteboardOpen(p => !p);
+                    setIsSettingsOpen(false);
+                    setIsPinsOpen(false);
+                  }}
+                  title="System Design Whiteboard"
+                  className={`icon-btn ${isWhiteboardOpen ? 'icon-btn--active' : ''}`}
+                >
+                  <Cpu className="w-4 h-4" />
                 </button>
                 <button
                   type="button"
@@ -1099,6 +1201,15 @@ Keep any code words and technical identifiers in proper English.`,
           onClose={() => setIsSettingsOpen(false)}
           onChange={handleSettingsChange}
           onReset={handleSettingsReset}
+        />
+
+        {/* ── System Design Whiteboard ───────────────────── */}
+        <SystemDesignWhiteboard
+          open={isWhiteboardOpen}
+          loading={whiteboardLoading}
+          data={whiteboardData}
+          onClose={() => setIsWhiteboardOpen(false)}
+          onDesign={generateSystemDesign}
         />
 
         {/* ── Timer Popup ───────────────────────────────── */}
