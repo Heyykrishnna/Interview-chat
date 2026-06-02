@@ -73,7 +73,7 @@ const groq = new Groq({
 });
 
 const groqWorkflow = new Groq({
-  apiKey: import.meta.env.VITE_GROQ_WORKFLOW_API_KEY || import.meta.env.VITE_GROQ_API_KEY || '',
+  apiKey: import.meta.env.VITE_GROQ_WORKFLOW_API_KEY || '',
   dangerouslyAllowBrowser: true,
 });
 
@@ -234,6 +234,36 @@ function parseFollowUpArray(raw: string): string[] {
   } catch {
     return [];
   }
+}
+
+function parseSystemDesignJson(raw: string): SystemDesignData {
+  const stripped = raw
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```$/i, '')
+    .trim();
+  const block = stripped.match(/\{[\s\S]*\}/);
+  const jsonStr = block ? block[0] : stripped;
+  const parsed = JSON.parse(jsonStr) as Partial<SystemDesignData>;
+  const diagram =
+    typeof parsed.diagram === 'string'
+      ? parsed.diagram.replace(/\\n/g, '\n')
+      : '';
+  return {
+    system: String(parsed.system ?? 'System'),
+    overview: String(parsed.overview ?? ''),
+    diagram,
+    apis: Array.isArray(parsed.apis) ? parsed.apis : [],
+    database: Array.isArray(parsed.database) ? parsed.database : [],
+    scaling: {
+      dau: parsed.scaling?.dau ?? '—',
+      storage: parsed.scaling?.storage ?? '—',
+      bandwidth: parsed.scaling?.bandwidth,
+      qps: parsed.scaling?.qps,
+      strategies: Array.isArray(parsed.scaling?.strategies) ? parsed.scaling.strategies : [],
+      technologies: Array.isArray(parsed.scaling?.technologies) ? parsed.scaling.technologies : [],
+      tradeoffs: Array.isArray(parsed.scaling?.tradeoffs) ? parsed.scaling.tradeoffs : [],
+    },
+  };
 }
 
 // ─── App ──────────────────────────────────────────────────────────────────────
@@ -670,9 +700,9 @@ Keep any code words and technical identifiers in proper English.`,
 
   // ── System Design Generator ───────────────────────────────────────────────
   const generateSystemDesign = useCallback(async (system: string) => {
-    const key = import.meta.env.VITE_GROQ_WORKFLOW_API_KEY || import.meta.env.VITE_GROQ_API_KEY;
+    const key = import.meta.env.VITE_GROQ_WORKFLOW_API_KEY;
     if (!key) {
-      addMsg('assistant', '**API key missing** — add `VITE_GROQ_WORKFLOW_API_KEY` to `.env` to use the Whiteboard.');
+      addMsg('assistant', '**API key missing** — add `VITE_GROQ_WORKFLOW_API_KEY` to `.env` and restart the dev server.');
       return;
     }
     setIsWhiteboardOpen(true);
@@ -682,7 +712,8 @@ Keep any code words and technical identifiers in proper English.`,
       const completion = await groqWorkflow.chat.completions.create({
         model: 'llama-3.3-70b-versatile',
         temperature: 0.25,
-        max_completion_tokens: 3000,
+        max_completion_tokens: 4096,
+        response_format: { type: 'json_object' },
         messages: [
           {
             role: 'system',
@@ -691,7 +722,7 @@ Return ONLY a single valid JSON object — no markdown, no prose, no code fences
 {
   "system": "string — product name",
   "overview": "string — 3-4 sentence executive summary covering purpose, scale, and core technical decisions",
-  "diagram": "string — an ASCII art architecture diagram using box-drawing chars (┌─┐└┘│├┤┬┴┼▶◀) showing the main components and data flow, at least 20 lines",
+  "diagram": "string — ASCII art architecture diagram using box-drawing chars (┌─┐└┘│├┤┬┴┼▶◀); at least 12 logical lines; use \\n for line breaks inside this string (never insert raw newline characters inside JSON string values)",
   "apis": [
     {
       "method": "GET|POST|PUT|DELETE|PATCH|WS",
@@ -728,13 +759,23 @@ Include at least 6 API endpoints, 4 database tables, and make all numbers realis
         ],
       });
       const raw = completion.choices[0]?.message?.content ?? '';
-      // Strip any accidental markdown code fences
-      const stripped = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
-      const parsed = JSON.parse(stripped) as SystemDesignData;
-      setWhiteboardData(parsed);
+      if (!raw.trim()) {
+        throw new Error('Empty response from model');
+      }
+      setWhiteboardData(parseSystemDesignJson(raw));
     } catch (err) {
       console.error('Whiteboard error:', err);
-      addMsg('assistant', `**Whiteboard error** — could not generate design for "${system}". Try again or check your API key.`);
+      const status = err && typeof err === 'object' && 'status' in err ? (err as { status?: number }).status : undefined;
+      const isAuth = status === 401 || status === 403;
+      const detail =
+        err instanceof Error && !isAuth && err.message !== 'Empty response from model'
+          ? ' The response could not be parsed — try again.'
+          : isAuth
+            ? ' Check that `VITE_GROQ_WORKFLOW_API_KEY` is valid.'
+            : status === 429
+              ? ' Rate limited — wait a moment and try again.'
+              : ' Try again or check `VITE_GROQ_WORKFLOW_API_KEY` in `.env`.';
+      addMsg('assistant', `**Whiteboard error** — could not generate design for "${system}".${detail}`);
       setIsWhiteboardOpen(false);
     } finally {
       setWhiteboardLoading(false);
