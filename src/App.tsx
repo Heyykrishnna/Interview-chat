@@ -68,6 +68,8 @@ const IS_ELECTRON = (() => {
   }
 })();
 
+const GROQ_CHAT_MODEL = 'openai/gpt-oss-120b';
+
 const groq = new Groq({
   apiKey: import.meta.env.VITE_GROQ_API_KEY || '',
   dangerouslyAllowBrowser: true,
@@ -671,9 +673,9 @@ export default function App() {
     const currentMode = INTERVIEW_MODES.find(m => m.id === (settings.interviewMode ?? 'general'));
     try {
       const completion = await groq.chat.completions.create({
-        model: 'llama-3.3-70b-versatile',
+        model: GROQ_CHAT_MODEL,
         temperature: 0.35,
-        max_completion_tokens: 200,
+        max_completion_tokens: 400,
         messages: [
           {
             role: 'system',
@@ -711,7 +713,7 @@ Keep any code words and technical identifiers in proper English.`,
     setWhiteboardData(null);
     try {
       const completion = await groqWorkflow.chat.completions.create({
-        model: 'llama-3.3-70b-versatile',
+        model: GROQ_CHAT_MODEL,
         temperature: 0.25,
         max_completion_tokens: 4096,
         response_format: { type: 'json_object' },
@@ -804,7 +806,7 @@ Include at least 6 API endpoints, 4 database tables, and make all numbers realis
       try {
         const history: MsgForHistory[] = [...messages, { role: 'user' as const, content: trimmed }].slice(-12);
         const completion = await groq.chat.completions.create({
-          model: 'llama-3.3-70b-versatile',
+          model: GROQ_CHAT_MODEL,
           temperature: 0.3,
           max_completion_tokens: 400,
           messages: [
@@ -820,7 +822,18 @@ Include at least 6 API endpoints, 4 database tables, and make all numbers realis
         if (followUpReq.current === req) { setFollowUps(lines); setFollowUpsLoading(false); }
       } catch (err) {
         console.error(err);
-        addMsg('assistant', '**Connection error** — add your `VITE_GROQ_API_KEY` to `.env` and restart.');
+        const status = err && typeof err === 'object' && 'status' in err ? (err as { status?: number }).status : undefined;
+        const missing = !import.meta.env.VITE_GROQ_API_KEY;
+        const detail = missing
+          ? 'add `VITE_GROQ_API_KEY` to `.env` and restart the dev server.'
+          : status === 401 || status === 403
+            ? '`VITE_GROQ_API_KEY` was rejected. Check the key in `.env` and restart.'
+            : status === 429
+              ? 'Groq rate limited this request. Wait a moment and try again.'
+              : err instanceof Error && err.message
+                ? err.message
+                : 'the request to Groq failed. Try again.';
+        addMsg('assistant', `**Connection error** — ${detail}`);
       } finally {
         setIsLoading(false);
         setTimeout(() => inputRef.current?.focus(), 100);

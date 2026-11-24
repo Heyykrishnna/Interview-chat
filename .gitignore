@@ -24,4 +24,8 @@ dist-ssr
 *.sw?
 
 
+# Local env. Commit .env.example only.
 .env
+.env.local
+.env.*.local
+!.env.example
