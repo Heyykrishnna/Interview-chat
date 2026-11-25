@@ -33,6 +33,9 @@ export interface AppSettings {
   responseLanguage: ResponseLanguage;
   includeApproach: boolean;
   interviewMode: InterviewMode;
+  stealthFocusLock: boolean;
+  autoRelockFocus: boolean;
+  ocrDarkModeBoost: boolean;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -50,6 +53,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   responseLanguage: 'english',
   includeApproach: true,
   interviewMode: 'general',
+  stealthFocusLock: true,
+  autoRelockFocus: true,
+  ocrDarkModeBoost: true,
 };
 
 // ─── Theme & Font Definitions ─────────────────────────────────────────────────
@@ -429,10 +435,12 @@ export function SettingsPanel({
                 <SettingsGroup label="Keyboard Shortcuts">
                   <div className="shortcuts-list">
                     {[
+                      { keys: ['⌘', '⇧', 'S'],     action: 'Snap whole screen & solve' },
+                      { keys: ['⌘', '⇧', 'K'],     action: 'Toggle Stealth Focus / Typing' },
                       { keys: ['⌘', '⇧', 'Space'], action: 'Toggle hide/show' },
                       { keys: ['⌘', '⇧', 'G'],     action: 'Ghost mode (click-through)' },
                       { keys: ['Enter'],             action: 'Send message' },
-                      { keys: ['Esc'],               action: 'Close settings' },
+                      { keys: ['Esc'],               action: 'Relock focus / Close panel' },
                     ].map(sc => (
                       <div key={sc.action} className="shortcut-row">
                         <span className="shortcut-action">{sc.action}</span>
@@ -441,6 +449,29 @@ export function SettingsPanel({
                         </div>
                       </div>
                     ))}
+                  </div>
+                </SettingsGroup>
+
+                <SettingsGroup label="Stealth & Screen Capture">
+                  <div className="toggle-list">
+                    <ToggleRow
+                      label="Stealth Focus Lock"
+                      description="Prevent clicks on Copilot from stealing focus or triggering blur detection"
+                      checked={settings.stealthFocusLock}
+                      onChange={v => set('stealthFocusLock', v)}
+                    />
+                    <ToggleRow
+                      label="Auto-relock after typing"
+                      description="Re-enable Stealth Focus Lock automatically after sending or pressing Esc"
+                      checked={settings.autoRelockFocus}
+                      onChange={v => set('autoRelockFocus', v)}
+                    />
+                    <ToggleRow
+                      label="Dark-mode OCR boost"
+                      description="Invert dark themes before OCR for sharper code and question extraction"
+                      checked={settings.ocrDarkModeBoost}
+                      onChange={v => set('ocrDarkModeBoost', v)}
+                    />
                   </div>
                 </SettingsGroup>
 

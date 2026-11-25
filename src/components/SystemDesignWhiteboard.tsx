@@ -307,12 +307,14 @@ interface SystemDesignWhiteboardProps {
   open: boolean;
   loading: boolean;
   data: SystemDesignData | null;
+  stealthFocus?: boolean;
+  onUnlockTyping?: () => void;
   onClose: () => void;
   onDesign: (system: string) => void;
 }
 
 export function SystemDesignWhiteboard({
-  open, loading, data, onClose, onDesign,
+  open, loading, data, stealthFocus = false, onUnlockTyping, onClose, onDesign,
 }: SystemDesignWhiteboardProps) {
   const [activeTab, setActiveTab] = useState<WhiteboardTab>('overview');
   const [customInput, setCustomInput] = useState('');
@@ -392,14 +394,20 @@ export function SystemDesignWhiteboard({
             ))}
           </div>
 
-          {/* ── Custom input ────────────────────────── */}
           <div className="wb-custom-row">
             <input
               type="text"
               value={customInput}
+              readOnly={stealthFocus}
+              onMouseDown={e => {
+                if (stealthFocus) {
+                  e.preventDefault();
+                  onUnlockTyping?.();
+                }
+              }}
               onChange={e => setCustomInput(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') handleCustomDesign(); }}
-              placeholder='Or type any system… e.g. "Design TikTok"'
+              placeholder={stealthFocus ? 'Click to unlock typing (⌘⇧K)…' : 'Or type any system… e.g. "Design TikTok"'}
               className="wb-custom-input"
               disabled={loading}
             />

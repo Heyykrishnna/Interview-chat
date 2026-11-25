@@ -192,6 +192,60 @@
   background: rgba(248, 113, 113, 0.12);
 }
 
+.icon-btn--stealth {
+  color: #34d399;
+  background: rgba(16, 185, 129, 0.12);
+}
+
+.icon-btn--warn {
+  color: #fbbf24;
+  background: rgba(251, 191, 36, 0.14);
+}
+
+.icon-btn--snap {
+  color: var(--accent-2);
+  background: var(--accent-muted);
+}
+
+.icon-btn--snap:hover:not(:disabled) {
+  background: var(--accent);
+  color: #fff;
+}
+
+.stealth-pill {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(16, 185, 129, 0.14);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.35);
+}
+
+.stealth-dot-badge {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+.stealth-dot-badge--on {
+  background: rgba(16, 185, 129, 0.14);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.32);
+}
+
+.stealth-dot-badge--off {
+  background: rgba(251, 191, 36, 0.14);
+  color: #fbbf24;
+  border: 1px solid rgba(251, 191, 36, 0.35);
+}
+
 .msg-bubble--user {
   background: var(--user-bubble);
   color: #fff;
@@ -356,6 +410,27 @@
   color: var(--text-muted);
   text-transform: lowercase;
   letter-spacing: 0.05em;
+}
+
+.code-copy-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.code-copy-btn:hover {
+  color: var(--text);
+  background: var(--accent-muted);
+  border-color: var(--accent);
 }
 
 .code-pre {
@@ -1502,11 +1577,16 @@
   line-height: 1;
 }
 
-/* Pin button on individual assistant messages */
-.pin-msg-btn {
+.msg-hover-actions {
   position: absolute;
   top: 7px;
   right: 7px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.pin-msg-btn {
   padding: 4px;
   border-radius: 6px;
   background: rgba(255, 255, 255, 0.1);
@@ -2512,4 +2592,448 @@
   color: var(--accent-2);
   background: var(--accent-muted);
   border-color: var(--accent);
+}
+
+.snap-strip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  border-top: 1px solid var(--panel-border);
+  background: rgba(0, 0, 0, 0.12);
+  overflow-x: auto;
+  scrollbar-width: none;
+  flex-shrink: 0;
+}
+
+.snap-strip::-webkit-scrollbar {
+  display: none;
+}
+
+.snap-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: all 0.16s ease;
+}
+
+.snap-pill:hover:not(:disabled) {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.18);
+  transform: translateY(-1px);
+}
+
+.snap-pill--primary {
+  background: var(--accent-muted);
+  color: var(--accent-2);
+  border-color: var(--accent);
+}
+
+.snap-pill--primary:hover:not(:disabled) {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+.snap-pill:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.snap-composer-btn {
+  border-radius: 999px;
+  padding: 10px;
+  border: 1px solid var(--accent);
+  background: var(--accent-muted);
+  color: var(--accent-2);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 0 12px var(--accent-muted);
+}
+
+.snap-composer-btn:hover:not(:disabled) {
+  background: var(--accent);
+  color: #fff;
+  transform: translateY(-1px);
+}
+
+.snap-composer-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.snap-composer-btn--busy {
+  background: var(--accent);
+  color: #fff;
+}
+
+.input-lock-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.input-field--with-lock {
+  padding-right: 36px;
+}
+
+.input-lock-btn {
+  position: absolute;
+  right: 6px;
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  border: none;
+  background: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.input-lock-btn--locked {
+  color: #34d399;
+}
+
+.input-lock-btn--locked:hover {
+  background: rgba(16, 185, 129, 0.16);
+}
+
+.input-lock-btn--unlocked {
+  color: #fbbf24;
+  background: rgba(251, 191, 36, 0.12);
+}
+
+.input-lock-btn--unlocked:hover {
+  background: rgba(251, 191, 36, 0.22);
+}
+
+.stealth-hint-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 12px;
+  background: rgba(16, 185, 129, 0.12);
+  border-top: 1px solid rgba(16, 185, 129, 0.28);
+  font-size: 10.5px;
+  font-weight: 600;
+  color: #6ee7b7;
+}
+
+.stealth-hint-unlock {
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid rgba(251, 191, 36, 0.45);
+  background: rgba(251, 191, 36, 0.15);
+  color: #fde68a;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.stealth-hint-unlock:hover {
+  background: rgba(251, 191, 36, 0.28);
+  color: #fff;
+}
+
+.snap-hud-card {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--accent);
+  border-radius: 14px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  box-shadow: 0 4px 18px var(--accent-muted);
+}
+
+.snap-hud-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.snap-hud-label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.snap-hud-pct {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--accent-2);
+}
+
+.snap-hud-track {
+  width: 100%;
+  height: 5px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.snap-hud-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+  transition: width 0.22s ease;
+}
+
+.msg-bubble--snap {
+  width: 100%;
+  max-width: 90% !important;
+  background: rgba(15, 23, 42, 0.65);
+  border: 1px solid var(--accent);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+}
+
+.snap-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.snap-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.snap-card-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.snap-card-stats {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.snap-stat-pill {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.snap-card-preview-row {
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+}
+
+.snap-thumb-btn {
+  position: relative;
+  width: 84px;
+  height: 56px;
+  border-radius: 9px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: #0b0f19;
+  padding: 0;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.snap-thumb-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.snap-thumb-zoom {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.85;
+}
+
+.snap-card-summary {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.snap-snippet-preview {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: rgba(255, 255, 255, 0.82);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
+}
+
+.snap-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.snap-mini-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.snap-mini-btn:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.snap-ocr-drawer {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.snap-ocr-textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 76px;
+  max-height: 180px;
+  border-radius: 9px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(0, 0, 0, 0.35);
+  color: #e2e8f0;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 1.45;
+  padding: 7px 9px;
+  outline: none;
+}
+
+.snap-ocr-textarea:focus {
+  border-color: var(--accent-2);
+}
+
+.snap-rerun-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.snap-rerun-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.snap-rerun-pill:hover:not(:disabled) {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.snap-rerun-pill:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.snap-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  background: rgba(0, 0, 0, 0.72);
+  backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.snap-lightbox-inner {
+  position: relative;
+  max-width: 96%;
+  max-height: 92%;
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: #0b0f19;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.7);
+}
+
+.snap-lightbox-img {
+  display: block;
+  max-width: 100%;
+  max-height: 82vh;
+  object-fit: contain;
+}
+
+.snap-lightbox-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(0, 0, 0, 0.7);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
 }

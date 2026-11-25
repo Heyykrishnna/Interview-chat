@@ -3,13 +3,23 @@ import {
   Mic, Monitor, EyeOff, Send, MicOff, Trash2,
   ChevronDown, ChevronUp, Eye, Loader2, Fan, Settings,
   BookmarkPlus, Bookmark, Timer, Copy, Check, Play, Pause, RotateCcw, Cpu,
+  Camera, ShieldCheck, Lock, Unlock, Zap, Bug, Gauge, MessageSquareText, FileText, X,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import Tesseract from 'tesseract.js';
 import Groq from 'groq-sdk';
-import type { DesktopCaptureConstraints } from './types/electron';
+import type { DesktopCaptureConstraints, ElectronIpcRenderer } from './types/electron';
 import { createRecordingCapture } from './audioCapture';
 import { MessageContent } from './components/MessageContent';
+import { SnapMessageCard } from './components/SnapMessageCard';
+import {
+  SNAP_PRESETS,
+  buildSnapPrompt,
+  runOcrOnImageDataUrl,
+  runWholePageSnapOcr,
+  type SnapAction,
+  type SnapMessageMeta,
+  type SnapStage,
+} from './screenSnap';
 import {
   SettingsPanel,
   loadSettings,
@@ -27,7 +37,7 @@ import {
 import { IconTooltip } from './components/IconTooltip';
 
 const PANEL_DEFAULT_W = 440;
-const PANEL_DEFAULT_H = 540;
+const PANEL_DEFAULT_H = 560;
 const PANEL_MIN_W = 300;
 const PANEL_MIN_H = 380;
 const PANEL_MAX_W = 720;
@@ -38,8 +48,19 @@ const PINS_KEY = 'copilot-pins-v1';
 type WindowBounds = { x: number; y: number; width: number; height: number };
 type ResizeEdge = 'e' | 's' | 'se' | 'w';
 type PanelSize = { width: number; height: number };
-type Message = { id: string; role: 'user' | 'assistant'; content: string };
+type Message = {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  snapMeta?: SnapMessageMeta;
+};
 type PinnedMessage = { id: string; content: string; pinnedAt: number; mode: InterviewMode };
+type SnapLiveState = {
+  stage: SnapStage;
+  action: SnapAction;
+  progress: number;
+  previewDataUrl?: string;
+};
 
 function clampPanelSize(w: number, h: number): PanelSize {
   return {
@@ -79,8 +100,6 @@ const groqWorkflow = new Groq({
   apiKey: import.meta.env.VITE_GROQ_WORKFLOW_API_KEY || '',
   dangerouslyAllowBrowser: true,
 });
-
-// ─── Interview Modes ─────────────────────────────────────────────────────────
 
 const INTERVIEW_MODES: {
   id: InterviewMode;
@@ -146,12 +165,10 @@ const INTERVIEW_MODES: {
   },
 ];
 
-// ─── System Prompt ────────────────────────────────────────────────────────────
-
 type MsgForHistory = { role: 'user' | 'assistant'; content: string };
 
 const WELCOME =
-  'Your real-time AI interview assistant for coding rounds, system design, debugging, behavioral questions, and live problem solving.';
+  'Your real-time AI interview assistant. Click **Snap & Solve** (or press **⌘⇧S**) to capture the whole page, extract text, and get the answer instantly — without stealing focus from your active site.';
 
 const DEFAULT_FOLLOW_UPS = [
   'Summarize what is on my screen',
@@ -165,7 +182,7 @@ Formatting rules (follow strictly):
 - Use **markdown** for structure: bold for emphasis, numbered lists for steps, bullet lists for options.
 - Wrap all code, commands, SQL, regex, and config in fenced blocks with the correct language tag (e.g. \`\`\`python, \`\`\`sql, \`\`\`bash).
 - Use \`inline code\` for identifiers, function names, keys, and short snippets.
-- Keep answers focused: 80–150 words unless the user asks for depth.
+- Keep answers focused and complete — prioritize correctness and clarity.
 - Sound like a senior engineer in a live interview — direct, no fluff.`;
 
 function getLanguageInstruction(language: AppSettings['responseLanguage']): string {
@@ -201,7 +218,7 @@ function getModeAddendum(mode: InterviewMode): string {
   return INTERVIEW_MODES.find(m => m.id === mode)?.addendum ?? '';
 }
 
-function buildSystemPrompt(settings: AppSettings): string {
+function buildSystemPrompt(settings: AppSettings, includeScreenSection = true): string {
   const parts = [
     BASE_SYSTEM_PROMPT,
     getLanguageInstruction(settings.responseLanguage),
@@ -209,15 +226,13 @@ function buildSystemPrompt(settings: AppSettings): string {
   ];
   const modeAdd = getModeAddendum(settings.interviewMode ?? 'general');
   if (modeAdd) parts.push(modeAdd);
-  parts.push('\nScreen context (OCR snapshot):\n');
+  if (includeScreenSection) {
+    parts.push('\nScreen context (OCR snapshot):\n');
+  }
   return parts.join('\n\n');
 }
 
-function ipc(): {
-  invoke: (c: string, ...a: unknown[]) => Promise<unknown>;
-  on: (e: string, fn: () => void) => void;
-  removeListener: (e: string, fn: () => void) => void;
-} | null {
+function ipc(): ElectronIpcRenderer | null {
   try {
     return window.require?.('electron')?.ipcRenderer ?? null;
   } catch {
@@ -269,10 +284,45 @@ function parseSystemDesignJson(raw: string): SystemDesignData {
   };
 }
 
-// ─── App ──────────────────────────────────────────────────────────────────────
+function getSnapPresetIcon(id: SnapAction) {
+  switch (id) {
+    case 'solve':
+      return <Zap className="w-3 h-3" />;
+    case 'fix':
+      return <Bug className="w-3 h-3" />;
+    case 'optimize':
+      return <Gauge className="w-3 h-3" />;
+    case 'explain':
+      return <MessageSquareText className="w-3 h-3" />;
+    case 'ocr-only':
+      return <FileText className="w-3 h-3" />;
+  }
+}
+
+function getSnapStageText(state: SnapLiveState): string {
+  switch (state.stage) {
+    case 'capturing':
+      return 'Capturing full screen…';
+    case 'preprocessing':
+      return 'Enhancing text contrast…';
+    case 'ocr':
+      return `Extracting page text (${state.progress}%)…`;
+    case 'solving':
+      return 'Solving from extracted text…';
+  }
+}
+
+function formatGroqErrorDetail(err: unknown): string {
+  const status = err && typeof err === 'object' && 'status' in err ? (err as { status?: number }).status : undefined;
+  const missing = !import.meta.env.VITE_GROQ_API_KEY;
+  if (missing) return 'add `VITE_GROQ_API_KEY` to `.env` and restart the dev server.';
+  if (status === 401 || status === 403) return '`VITE_GROQ_API_KEY` was rejected. Check the key in `.env` and restart.';
+  if (status === 429) return 'Groq rate limited this request. Wait a moment and try again.';
+  if (err instanceof Error && err.message) return err.message;
+  return 'the request to Groq failed. Try again.';
+}
 
 export default function App() {
-  // ── Core chat state ────────────────────────────────────────────────────────
   const [messages, setMessages] = useState<Message[]>([
     { id: 'welcome', role: 'assistant', content: WELCOME },
   ]);
@@ -290,12 +340,20 @@ export default function App() {
   const [activeSettingsSection, setActiveSettingsSection] = useState<Section>('appearance');
   const [settings, setSettings] = useState<AppSettings>(() => loadSettings());
 
-  // ── System Design Whiteboard ──────────────────────────────────────────────
+  const [stealthFocus, setStealthFocus] = useState<boolean>(() =>
+    IS_ELECTRON ? loadSettings().stealthFocusLock : false,
+  );
+  const [showTypeHint, setShowTypeHint] = useState(false);
+  const typeHintTimeoutRef = useRef<number | null>(null);
+
+  const [snapState, setSnapState] = useState<SnapLiveState | null>(null);
+  const [lightboxImage, setLightboxImage] = useState<string | null>(null);
+  const [copiedMsgId, setCopiedMsgId] = useState<string | null>(null);
+
   const [isWhiteboardOpen, setIsWhiteboardOpen] = useState(false);
   const [whiteboardData, setWhiteboardData] = useState<SystemDesignData | null>(null);
   const [whiteboardLoading, setWhiteboardLoading] = useState(false);
 
-  // ── Saved Snippets (Pins) ─────────────────────────────────────────────────
   const [pinnedMessages, setPinnedMessages] = useState<PinnedMessage[]>(() => {
     try {
       const raw = localStorage.getItem(PINS_KEY);
@@ -305,7 +363,6 @@ export default function App() {
   const [isPinsOpen, setIsPinsOpen] = useState(false);
   const [copiedPinId, setCopiedPinId] = useState<string | null>(null);
 
-  // ── Interview Timer ────────────────────────────────────────────────────────
   const [timerMode, setTimerMode] = useState<'stopwatch' | 'countdown'>('stopwatch');
   const [timerRunning, setTimerRunning] = useState(false);
   const [timerElapsed, setTimerElapsed] = useState(0);
@@ -313,26 +370,43 @@ export default function App() {
   const [showTimerPopup, setShowTimerPopup] = useState(false);
   const timerIntervalRef = useRef<number | null>(null);
 
-  // ── Settings sync ──────────────────────────────────────────────────────────
   useLayoutEffect(() => {
     applySettings(settings);
     saveSettings(settings);
   }, [settings, isCollapsed, isSettingsOpen]);
 
-  const handleSettingsChange = useCallback((next: AppSettings) => {
-    setSettings(next);
+  const setElectronFocusLock = useCallback(async (locked: boolean, focusInputAfter = false) => {
+    const renderer = ipc();
+    if (!renderer || !IS_ELECTRON) {
+      setStealthFocus(false);
+      if (focusInputAfter) {
+        setTimeout(() => inputRef.current?.focus(), 20);
+      }
+      return;
+    }
+    const next = Boolean(await renderer.invoke('SET_FOCUS_LOCK', locked));
+    setStealthFocus(next);
+    if (!next && focusInputAfter) {
+      setTimeout(() => inputRef.current?.focus(), 30);
+    }
   }, []);
+
+  const handleSettingsChange = useCallback((next: AppSettings) => {
+    if (next.stealthFocusLock !== settings.stealthFocusLock) {
+      void setElectronFocusLock(next.stealthFocusLock);
+    }
+    setSettings(next);
+  }, [settings.stealthFocusLock, setElectronFocusLock]);
 
   const handleSettingsReset = useCallback(() => {
     setSettings(DEFAULT_SETTINGS);
-  }, []);
+    void setElectronFocusLock(DEFAULT_SETTINGS.stealthFocusLock);
+  }, [setElectronFocusLock]);
 
-  // ── Persist pins ──────────────────────────────────────────────────────────
   useEffect(() => {
     try { localStorage.setItem(PINS_KEY, JSON.stringify(pinnedMessages)); } catch { /* noop */ }
   }, [pinnedMessages]);
 
-  // ── Timer interval ────────────────────────────────────────────────────────
   useEffect(() => {
     if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
     if (!timerRunning) return;
@@ -348,7 +422,6 @@ export default function App() {
     return () => { if (timerIntervalRef.current) clearInterval(timerIntervalRef.current); };
   }, [timerRunning, timerMode, timerTotal]);
 
-  // ── Panel position / resize / drag ────────────────────────────────────────
   const [pos, setPos] = useState({
     x: typeof window !== 'undefined' ? window.innerWidth - PANEL_DEFAULT_W - 24 : 24,
     y: 20,
@@ -389,38 +462,60 @@ export default function App() {
   });
   const followUpReq = useRef(0);
 
-  const panelRef       = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const videoRef       = useRef<HTMLVideoElement>(null);
-  const canvasRef      = useRef<HTMLCanvasElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
   const ocrIntervalRef = useRef<number | null>(null);
-  const latestOcr      = useRef('');
-  const mediaRecorderRef     = useRef<MediaRecorder | null>(null);
-  const recordingCleanupRef  = useRef<(() => void) | null>(null);
-  const audioChunks          = useRef<Blob[]>([]);
-  const inputRef             = useRef<HTMLInputElement>(null);
+  const latestOcr = useRef('');
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordingCleanupRef = useRef<(() => void) | null>(null);
+  const audioChunks = useRef<Blob[]>([]);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const triggerSnapRef = useRef<(action?: SnapAction) => Promise<void>>(async () => {});
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, isLoading]);
+  }, [messages, isLoading, snapState]);
 
   useEffect(() => {
     const renderer = ipc();
     if (!renderer || !IS_ELECTRON) return;
     void renderer.invoke('TOGGLE_MOUSE_EVENTS', false);
+    const initialLock = loadSettings().stealthFocusLock;
+    void renderer.invoke('SET_FOCUS_LOCK', initialLock).then(locked => {
+      setStealthFocus(Boolean(locked));
+    });
   }, []);
 
   useEffect(() => {
     const renderer = ipc();
     if (!renderer) return;
-    const handler = () =>
+    const onGhostToggle = () =>
       setIsGhost(prev => {
         const next = !prev;
         void renderer.invoke('TOGGLE_MOUSE_EVENTS', next);
         return next;
       });
-    renderer.on('TOGGLE_GHOST_MODE_FROM_MAIN', handler);
-    return () => renderer.removeListener('TOGGLE_GHOST_MODE_FROM_MAIN', handler);
+    const onFocusChanged = (_event: unknown, locked: unknown) => {
+      const next = Boolean(locked);
+      setStealthFocus(next);
+      if (!next) {
+        setShowTypeHint(false);
+        setTimeout(() => inputRef.current?.focus(), 30);
+      }
+    };
+    const onSnapShortcut = () => {
+      void triggerSnapRef.current('solve');
+    };
+    renderer.on('TOGGLE_GHOST_MODE_FROM_MAIN', onGhostToggle);
+    renderer.on('STEALTH_FOCUS_CHANGED', onFocusChanged);
+    renderer.on('TRIGGER_SCREEN_SNAP_FROM_MAIN', onSnapShortcut);
+    return () => {
+      renderer.removeListener('TOGGLE_GHOST_MODE_FROM_MAIN', onGhostToggle);
+      renderer.removeListener('STEALTH_FOCUS_CHANGED', onFocusChanged);
+      renderer.removeListener('TRIGGER_SCREEN_SNAP_FROM_MAIN', onSnapShortcut);
+    };
   }, []);
 
   useEffect(() => {
@@ -454,7 +549,7 @@ export default function App() {
 
   useLayoutEffect(() => {
     void syncWindowBounds();
-  }, [syncWindowBounds, isCollapsed, panelSize.width, panelSize.height, messages.length, isLoading, followUps.length, followUpsLoading, isFollowUpsExpanded]);
+  }, [syncWindowBounds, isCollapsed, panelSize.width, panelSize.height, messages.length, isLoading, snapState, followUps.length, followUpsLoading, isFollowUpsExpanded]);
 
   useEffect(() => {
     const el = panelRef.current;
@@ -465,8 +560,11 @@ export default function App() {
   }, [syncWindowBounds, isCollapsed]);
 
   const onDragStart = useCallback(
-    async (e: React.MouseEvent) => {
+    async (e: React.PointerEvent<HTMLDivElement>) => {
       if (resizing.current.active) return;
+      try {
+        e.currentTarget.setPointerCapture(e.pointerId);
+      } catch { /* noop */ }
       dragging.current = true;
       const renderer = ipc();
       if (renderer && IS_ELECTRON) {
@@ -482,9 +580,12 @@ export default function App() {
   );
 
   const onResizeStart = useCallback(
-    async (edge: ResizeEdge, e: React.MouseEvent) => {
+    async (edge: ResizeEdge, e: React.PointerEvent<HTMLDivElement>) => {
       e.preventDefault();
       e.stopPropagation();
+      try {
+        e.currentTarget.setPointerCapture(e.pointerId);
+      } catch { /* noop */ }
       dragging.current = false;
       const renderer = ipc();
       let boundsX = pos.x;
@@ -504,7 +605,7 @@ export default function App() {
   );
 
   useEffect(() => {
-    const onMove = (e: MouseEvent) => {
+    const onMove = (e: PointerEvent) => {
       const renderer = ipc();
       if (resizing.current.active && resizing.current.edge) {
         const { edge, startX, startY, startW, startH, startPosX, startBoundsX } = resizing.current;
@@ -542,7 +643,7 @@ export default function App() {
         });
       } else {
         setPos({
-          x: Math.max(8, Math.min(window.innerWidth  - panelSize.width  - 8, e.clientX - dragOffset.current.x)),
+          x: Math.max(8, Math.min(window.innerWidth - panelSize.width - 8, e.clientX - dragOffset.current.x)),
           y: Math.max(8, Math.min(window.innerHeight - panelSize.height - 8, e.clientY - dragOffset.current.y)),
         });
       }
@@ -553,12 +654,16 @@ export default function App() {
       resizing.current.edge = null;
       void syncWindowBounds();
     };
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
-    return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+    return () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+    };
   }, [panelSize.height, panelSize.width, syncWindowBounds]);
 
-  // ── Ghost mode ────────────────────────────────────────────────────────────
   const toggleGhost = () => {
     const renderer = ipc();
     setIsGhost(prev => {
@@ -568,11 +673,52 @@ export default function App() {
     });
   };
 
-  // ── Screen OCR ────────────────────────────────────────────────────────────
+  const triggerTypeHint = useCallback(() => {
+    setShowTypeHint(true);
+    if (typeHintTimeoutRef.current) clearTimeout(typeHintTimeoutRef.current);
+    typeHintTimeoutRef.current = window.setTimeout(() => {
+      setShowTypeHint(false);
+    }, 2800);
+  }, []);
+
+  const toggleStealthFocus = useCallback(() => {
+    if (!IS_ELECTRON) return;
+    const nextLocked = !stealthFocus;
+    setShowTypeHint(false);
+    void setElectronFocusLock(nextLocked, !nextLocked);
+  }, [stealthFocus, setElectronFocusLock]);
+
+  const unlockTypingNow = useCallback(() => {
+    setShowTypeHint(false);
+    void setElectronFocusLock(false, true);
+  }, [setElectronFocusLock]);
+
+  const runOcr = useCallback(async () => {
+    if (!videoRef.current || !canvasRef.current) return;
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    if (!video.videoWidth || !video.videoHeight) return;
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.drawImage(video, 0, 0);
+    const imgData = canvas.toDataURL('image/png');
+    try {
+      const { extractedText } = await runOcrOnImageDataUrl(imgData, settings.ocrDarkModeBoost);
+      if (extractedText.length > 10) {
+        latestOcr.current = extractedText;
+        setOcrStatus('Synced');
+      }
+    } catch (e) {
+      console.error('OCR error', e);
+    }
+  }, [settings.ocrDarkModeBoost]);
+
   const startScanning = async () => {
     const renderer = ipc();
     if (!renderer) {
-      addMsg('assistant', 'Screen capture requires the **Electron** desktop app.');
+      addMsg('assistant', 'Live background scanning requires the **Electron** desktop app — use **Snap & Solve** for instant capture.');
       return;
     }
     try {
@@ -591,7 +737,7 @@ export default function App() {
       if (videoRef.current) { videoRef.current.srcObject = stream; void videoRef.current.play(); }
       setIsScanning(true);
       setOcrStatus('Live');
-      ocrIntervalRef.current = window.setInterval(runOcr, 6000);
+      ocrIntervalRef.current = window.setInterval(() => { void runOcr(); }, 6000);
     } catch (err) {
       console.error(err);
       addMsg('assistant', 'Could not start screen capture — check **System Settings → Privacy → Screen Recording**.');
@@ -609,27 +755,18 @@ export default function App() {
     latestOcr.current = '';
   };
 
-  const runOcr = async () => {
-    if (!videoRef.current || !canvasRef.current) return;
-    const video = videoRef.current;
-    const canvas = canvasRef.current;
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    ctx.drawImage(video, 0, 0);
-    const imgData = canvas.toDataURL('image/jpeg', 0.8);
+  const addMsg = useCallback((role: 'user' | 'assistant', content: string, snapMeta?: SnapMessageMeta) => {
+    setMessages(prev => [...prev, { id: makeId(), role, content, ...(snapMeta ? { snapMeta } : {}) }]);
+  }, []);
+
+  const copyMessage = useCallback(async (id: string, content: string) => {
     try {
-      const { data: { text } } = await Tesseract.recognize(imgData, 'eng');
-      if (text.trim().length > 10) { latestOcr.current = text.trim(); setOcrStatus('Synced'); }
-    } catch (e) { console.error('OCR error', e); }
-  };
+      await navigator.clipboard.writeText(content);
+      setCopiedMsgId(id);
+      setTimeout(() => setCopiedMsgId(null), 1500);
+    } catch { /* noop */ }
+  }, []);
 
-  // ── Message helpers ───────────────────────────────────────────────────────
-  const addMsg = (role: 'user' | 'assistant', content: string) =>
-    setMessages(prev => [...prev, { id: makeId(), role, content }]);
-
-  // ── Pin helpers ───────────────────────────────────────────────────────────
   const pinMessage = useCallback((id: string, content: string) => {
     setPinnedMessages(prev => {
       if (prev.some(p => p.id === id)) return prev.filter(p => p.id !== id);
@@ -653,9 +790,8 @@ export default function App() {
     } catch { /* noop */ }
   }, []);
 
-  // ── Timer helpers ─────────────────────────────────────────────────────────
   const timerRemaining = Math.max(0, timerTotal - timerElapsed);
-  const timerDisplay   = timerMode === 'countdown' ? formatTimer(timerRemaining) : formatTimer(timerElapsed);
+  const timerDisplay = timerMode === 'countdown' ? formatTimer(timerRemaining) : formatTimer(timerElapsed);
   const isTimerWarning = timerMode === 'countdown' && timerRunning && timerRemaining <= 300 && timerRemaining > 0;
   const isTimerFinished = timerMode === 'countdown' && timerElapsed >= timerTotal;
 
@@ -666,7 +802,6 @@ export default function App() {
     setTimerRunning(r => !r);
   }, [isTimerFinished, resetTimer]);
 
-  // ── Follow-ups ────────────────────────────────────────────────────────────
   const fetchFollowUps = useCallback(async (assistantText: string, userText: string): Promise<string[]> => {
     const key = import.meta.env.VITE_GROQ_API_KEY;
     if (!key) return [...DEFAULT_FOLLOW_UPS];
@@ -701,7 +836,6 @@ Keep any code words and technical identifiers in proper English.`,
     }
   }, [settings.responseLanguage, settings.interviewMode]);
 
-  // ── System Design Generator ───────────────────────────────────────────────
   const generateSystemDesign = useCallback(async (system: string) => {
     const key = import.meta.env.VITE_GROQ_WORKFLOW_API_KEY;
     if (!key) {
@@ -783,21 +917,155 @@ Include at least 6 API endpoints, 4 database tables, and make all numbers realis
     } finally {
       setWhiteboardLoading(false);
     }
-  }, []);
+  }, [addMsg]);
 
-  // ── Send message ──────────────────────────────────────────────────────────
+  const solveExtractedText = useCallback(
+    async (action: SnapAction, extractedText: string, snapMeta?: SnapMessageMeta) => {
+      if (isLoading) return;
+      const cleanText = extractedText.trim();
+      if (!cleanText) return;
+
+      followUpReq.current += 1;
+      setFollowUpsLoading(false);
+      latestOcr.current = cleanText;
+
+      const prompt = buildSnapPrompt(action, cleanText);
+      addMsg('user', prompt, snapMeta);
+      setIsLoading(true);
+
+      try {
+        const history: MsgForHistory[] = [
+          ...messages.slice(-10).map(m => ({ role: m.role, content: m.content })),
+          { role: 'user' as const, content: prompt },
+        ];
+        const completion = await groq.chat.completions.create({
+          model: GROQ_CHAT_MODEL,
+          temperature: 0.25,
+          max_completion_tokens: 1400,
+          messages: [
+            { role: 'system', content: buildSystemPrompt(settings, false) },
+            ...history,
+          ],
+        });
+        const reply = completion.choices[0]?.message?.content ?? "I couldn't generate a response.";
+        addMsg('assistant', reply);
+
+        const req = ++followUpReq.current;
+        setFollowUpsLoading(true);
+        const lines = await fetchFollowUps(reply, cleanText.slice(0, 500));
+        if (followUpReq.current === req) {
+          setFollowUps(lines);
+          setFollowUpsLoading(false);
+        }
+      } catch (err) {
+        console.error(err);
+        addMsg('assistant', `**Connection error** — ${formatGroqErrorDetail(err)}`);
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [addMsg, fetchFollowUps, isLoading, messages, settings],
+  );
+
+  const triggerScreenSnap = useCallback(
+    async (action: SnapAction = 'solve') => {
+      if (isLoading || snapState?.stage) return;
+      if (isCollapsed) {
+        handleExpand();
+      }
+      setIsSettingsOpen(false);
+      setIsPinsOpen(false);
+      setShowTimerPopup(false);
+
+      setSnapState({ stage: 'capturing', action, progress: 10 });
+      try {
+        const result = await runWholePageSnapOcr(ipc(), {
+          autoInvertDark: settings.ocrDarkModeBoost,
+          onStage: (stage, progress = 0) => {
+            setSnapState(prev => (prev ? { ...prev, stage, progress } : { stage, action, progress }));
+          },
+        });
+
+        const meta: SnapMessageMeta = {
+          action,
+          previewDataUrl: result.previewDataUrl,
+          extractedText: result.extractedText,
+          charCount: result.charCount,
+          lineCount: result.lineCount,
+          darkModeInverted: result.darkModeInverted,
+          durationMs: result.durationMs,
+        };
+
+        if (result.extractedText.length < 10) {
+          addMsg('user', 'Captured full screen', meta);
+          addMsg(
+            'assistant',
+            'Captured the screen, but **no readable text** was detected. Try zooming in or ensuring the text is visible on screen.',
+          );
+          setSnapState(null);
+          return;
+        }
+
+        latestOcr.current = result.extractedText;
+
+        if (action === 'ocr-only') {
+          try {
+            await navigator.clipboard.writeText(result.extractedText);
+          } catch { /* noop */ }
+          addMsg('user', result.extractedText, meta);
+          addMsg(
+            'assistant',
+            `Extracted **${result.lineCount} lines** (${result.charCount} chars) in **${(result.durationMs / 1000).toFixed(1)}s** and copied the text to your clipboard.`,
+          );
+          setSnapState(null);
+          return;
+        }
+
+        setSnapState({
+          stage: 'solving',
+          action,
+          progress: 100,
+          previewDataUrl: result.previewDataUrl,
+        });
+        await solveExtractedText(action, result.extractedText, meta);
+        setSnapState(null);
+      } catch (err) {
+        console.error('Screen snap failed:', err);
+        setSnapState(null);
+        const msg = err instanceof Error ? err.message : '';
+        if (msg.includes('SCREEN_CAPTURE_UNAVAILABLE') || msg.includes('NotAllowedError')) {
+          addMsg(
+            'assistant',
+            'Could not capture the screen — check **System Settings → Privacy & Security → Screen Recording** and allow the app.',
+          );
+        } else {
+          addMsg('assistant', `**Screen snap error** — ${msg || 'could not capture and read the screen.'}`);
+        }
+      }
+    },
+    [addMsg, handleExpand, isCollapsed, isLoading, settings.ocrDarkModeBoost, snapState?.stage, solveExtractedText],
+  );
+
+  useEffect(() => {
+    triggerSnapRef.current = triggerScreenSnap;
+  }, [triggerScreenSnap]);
+
   const sendMessage = useCallback(
     async (text: string) => {
       const trimmed = text.trim();
       if (!trimmed || isLoading) return;
 
-      // ── Intercept "Design X" / "Architect X" commands ──────────────────────
+      if (IS_ELECTRON && settings.autoRelockFocus && !stealthFocus) {
+        void setElectronFocusLock(true);
+      }
+
       const designMatch = trimmed.match(/^(?:design|architect|whiteboard)\s+(.+)/i);
       if (designMatch) {
         await generateSystemDesign(designMatch[1].trim());
         setInput('');
         return;
       }
+
       followUpReq.current += 1;
       setFollowUpsLoading(false);
       addMsg('user', trimmed);
@@ -808,9 +1076,9 @@ Include at least 6 API endpoints, 4 database tables, and make all numbers realis
         const completion = await groq.chat.completions.create({
           model: GROQ_CHAT_MODEL,
           temperature: 0.3,
-          max_completion_tokens: 400,
+          max_completion_tokens: 1200,
           messages: [
-            { role: 'system', content: buildSystemPrompt(settings) + (latestOcr.current || '(none — enable Screen Context)') },
+            { role: 'system', content: buildSystemPrompt(settings) + (latestOcr.current || '(none — click Snap & Solve or enable Screen Context)') },
             ...history.map(m => ({ role: m.role, content: m.content })),
           ],
         });
@@ -822,34 +1090,24 @@ Include at least 6 API endpoints, 4 database tables, and make all numbers realis
         if (followUpReq.current === req) { setFollowUps(lines); setFollowUpsLoading(false); }
       } catch (err) {
         console.error(err);
-        const status = err && typeof err === 'object' && 'status' in err ? (err as { status?: number }).status : undefined;
-        const missing = !import.meta.env.VITE_GROQ_API_KEY;
-        const detail = missing
-          ? 'add `VITE_GROQ_API_KEY` to `.env` and restart the dev server.'
-          : status === 401 || status === 403
-            ? '`VITE_GROQ_API_KEY` was rejected. Check the key in `.env` and restart.'
-            : status === 429
-              ? 'Groq rate limited this request. Wait a moment and try again.'
-              : err instanceof Error && err.message
-                ? err.message
-                : 'the request to Groq failed. Try again.';
-        addMsg('assistant', `**Connection error** — ${detail}`);
+        addMsg('assistant', `**Connection error** — ${formatGroqErrorDetail(err)}`);
       } finally {
         setIsLoading(false);
-        setTimeout(() => inputRef.current?.focus(), 100);
+        if (!IS_ELECTRON || !settings.autoRelockFocus) {
+          setTimeout(() => inputRef.current?.focus(), 100);
+        }
       }
     },
-    [isLoading, messages, fetchFollowUps, settings],
+    [addMsg, fetchFollowUps, generateSystemDesign, isLoading, messages, setElectronFocusLock, settings, stealthFocus],
   );
 
   const clearChat = () => {
     followUpReq.current += 1;
     setFollowUpsLoading(false);
-    setMessages([{ id: makeId(), role: 'assistant', content: 'Fresh slate. Fire away — technical, behavioral, or system design.' }]);
+    setMessages([{ id: makeId(), role: 'assistant', content: 'Fresh slate. Click **Snap & Solve** or fire away with a question.' }]);
     setFollowUps(DEFAULT_FOLLOW_UPS);
   };
 
-  // ── Voice recording ───────────────────────────────────────────────────────
   const toggleRecording = async () => {
     if (isRecording) { mediaRecorderRef.current?.stop(); setIsRecording(false); return; }
     try {
@@ -881,7 +1139,6 @@ Include at least 6 API endpoints, 4 database tables, and make all numbers realis
     }
   };
 
-  // ── Shell styles ──────────────────────────────────────────────────────────
   const expandedShellStyle: React.CSSProperties = IS_ELECTRON
     ? { width: panelSize.width, height: panelSize.height }
     : { left: pos.x, top: pos.y, width: panelSize.width, height: panelSize.height };
@@ -890,20 +1147,23 @@ Include at least 6 API endpoints, 4 database tables, and make all numbers realis
     ? { width: 'max-content', height: COLLAPSED_H }
     : { left: pos.x, top: pos.y, width: 'max-content', height: COLLAPSED_H };
 
-  // ── Collapsed state ───────────────────────────────────────────────────────
+  const isSnapBusy = Boolean(snapState);
+
   if (isCollapsed) {
     return (
       <>
         <div ref={panelRef} className="copilot-shell copilot-shell--collapsed z-50" style={collapsedShellStyle}>
           <div
             className="collapsed-bar flex items-center gap-2 px-3.5 h-full cursor-grab active:cursor-grabbing select-none"
-            onMouseDown={onDragStart}
+            onPointerDown={e => void onDragStart(e)}
           >
             <span className="text-[13px] font-semibold text-[var(--text)] tracking-tight whitespace-nowrap">
               Interview Copilot
             </span>
+            {IS_ELECTRON && stealthFocus && (
+              <span className="stealth-pill shrink-0">Stealth</span>
+            )}
             {isScanning && <span className="status-pill shrink-0">{ocrStatus}</span>}
-            {/* Timer pill visible in collapsed state */}
             {(timerRunning || timerElapsed > 0) && (
               <span
                 className={`timer-collapsed-pill shrink-0 ${isTimerWarning ? 'timer-warning' : ''} ${isTimerFinished ? 'timer-finished' : ''}`}
@@ -915,11 +1175,26 @@ Include at least 6 API endpoints, 4 database tables, and make all numbers realis
               </span>
             )}
             <IconTooltip
+              label="Snap & Solve (⌘⇧S)"
+              hint="Capture whole page, extract text, and solve immediately."
+            >
+              <button
+                type="button"
+                disabled={isLoading || isSnapBusy}
+                onPointerDown={e => e.stopPropagation()}
+                onClick={e => { e.stopPropagation(); void triggerScreenSnap('solve'); }}
+                className="icon-btn icon-btn--snap shrink-0"
+              >
+                <Camera className="w-3.5 h-3.5" />
+              </button>
+            </IconTooltip>
+            <IconTooltip
               label="Expand Panel"
               hint="Open the full chat window with messages, input, and tools."
             >
               <button
                 type="button"
+                onPointerDown={e => e.stopPropagation()}
                 onClick={e => { e.stopPropagation(); handleExpand(); }}
                 className="icon-btn ml-0.5 shrink-0"
               >
@@ -934,7 +1209,6 @@ Include at least 6 API endpoints, 4 database tables, and make all numbers realis
     );
   }
 
-  // ── Expanded state ────────────────────────────────────────────────────────
   return (
     <>
       <div
@@ -946,27 +1220,33 @@ Include at least 6 API endpoints, 4 database tables, and make all numbers realis
       >
         <div className="copilot-panel relative h-full">
           <div className="copilot-panel-inner">
-
-            {/* ── Title Bar ──────────────────────────────── */}
             <div
-              className="title-bar flex items-center px-4 py-2.5 cursor-grab active:cursor-grabbing select-none shrink-0 gap-2"
-              onMouseDown={onDragStart}
+              className="title-bar flex items-center px-3.5 py-2.5 cursor-grab active:cursor-grabbing select-none shrink-0 gap-2"
+              onPointerDown={e => void onDragStart(e)}
             >
-              {/* Left: branding */}
               <div className="flex-1 min-w-0">
-                <p className="text-[14px] font-bold text-[var(--text)] tracking-tight leading-none truncate">
-                  Interview Copilot
-                </p>
+                <div className="flex items-center gap-1.5">
+                  <p className="text-[13.5px] font-bold text-[var(--text)] tracking-tight leading-none truncate">
+                    Interview Copilot
+                  </p>
+                  {IS_ELECTRON && (
+                    <span
+                      className={`stealth-dot-badge ${stealthFocus ? 'stealth-dot-badge--on' : 'stealth-dot-badge--off'}`}
+                      title={stealthFocus ? 'Zero-focus-steal active' : 'Typing unlocked'}
+                    >
+                      {stealthFocus ? 'Stealth' : 'Typing'}
+                    </span>
+                  )}
+                </div>
                 <div className="flex items-center gap-2 mt-0.5">
-                  <span className="text-[10px] text-[var(--text-muted)] font-medium">⌘⇧Space · ⌘⇧G</span>
+                  <span className="text-[10px] text-[var(--text-muted)] font-medium">⌘⇧S Snap · ⌘⇧K Type</span>
                   {isScanning && <span className="status-pill">{ocrStatus}</span>}
                 </div>
               </div>
 
-              {/* Center: Timer widget */}
               <div
                 className="flex items-center gap-1 shrink-0"
-                onMouseDown={e => e.stopPropagation()}
+                onPointerDown={e => e.stopPropagation()}
               >
                 <div className="relative">
                   <IconTooltip
@@ -1006,8 +1286,25 @@ Include at least 6 API endpoints, 4 database tables, and make all numbers realis
                 </IconTooltip>
               </div>
 
-              {/* Right: actions */}
-              <div className="flex items-center gap-0.5 shrink-0" onMouseDown={e => e.stopPropagation()}>
+              <div className="flex items-center gap-0.5 shrink-0" onPointerDown={e => e.stopPropagation()}>
+                {IS_ELECTRON && (
+                  <IconTooltip
+                    label={stealthFocus ? 'Stealth Focus Lock ON' : 'Typing Mode (Focus Unlocked)'}
+                    hint={
+                      stealthFocus
+                        ? 'Clicking Copilot never triggers site blur or tab-switch detection. Click or press ⌘⇧K to unlock typing.'
+                        : 'Keyboard typing enabled. Click or press ⌘⇧K (or Esc) to return to zero-focus-steal Stealth Focus.'
+                    }
+                  >
+                    <button
+                      type="button"
+                      onClick={toggleStealthFocus}
+                      className={`icon-btn ${stealthFocus ? 'icon-btn--stealth' : 'icon-btn--warn'}`}
+                    >
+                      <ShieldCheck className="w-4 h-4" />
+                    </button>
+                  </IconTooltip>
+                )}
                 <IconTooltip
                   label={isGhost ? 'Disable Ghost Mode' : 'Ghost Mode'}
                   hint={
@@ -1025,11 +1322,11 @@ Include at least 6 API endpoints, 4 database tables, and make all numbers realis
                   </button>
                 </IconTooltip>
                 <IconTooltip
-                  label={isScanning ? 'Stop Screen Context' : 'Screen Context'}
+                  label={isScanning ? 'Stop Live Screen Sync' : 'Live Screen Sync'}
                   hint={
                     isScanning
-                      ? 'Stop OCR capture from your display.'
-                      : 'Read on-screen text (LeetCode, docs, IDE) so answers match what you are looking at.'
+                      ? 'Stop background OCR polling.'
+                      : 'Continuously poll screen text in the background for typed follow-ups.'
                   }
                 >
                   <button
@@ -1086,7 +1383,7 @@ Include at least 6 API endpoints, 4 database tables, and make all numbers realis
                 </IconTooltip>
                 <IconTooltip
                   label="Settings"
-                  hint="Theme, language, interview mode, compact layout, and response style."
+                  hint="Theme, stealth focus, language, interview mode, and response style."
                   align="end"
                 >
                   <button
@@ -1099,7 +1396,7 @@ Include at least 6 API endpoints, 4 database tables, and make all numbers realis
                 </IconTooltip>
                 <IconTooltip
                   label="Collapse Panel"
-                  hint="Shrink to a minimal bar while keeping the app running in the background."
+                  hint="Shrink to a minimal bar while keeping Snap & Solve one click away."
                   align="end"
                 >
                   <button
@@ -1113,8 +1410,7 @@ Include at least 6 API endpoints, 4 database tables, and make all numbers realis
               </div>
             </div>
 
-            {/* ── Interview Mode Strip ────────────────────── */}
-            <div className="mode-strip" onMouseDown={e => e.stopPropagation()}>
+            <div className="mode-strip" onPointerDown={e => e.stopPropagation()}>
               {INTERVIEW_MODES.map(mode => (
                 <button
                   key={mode.id}
@@ -1128,7 +1424,6 @@ Include at least 6 API endpoints, 4 database tables, and make all numbers realis
               ))}
             </div>
 
-            {/* ── Messages ────────────────────────────────── */}
             <div
               className="flex-1 min-h-0 overflow-y-auto px-4 scrollbar-hide"
               style={{
@@ -1159,32 +1454,76 @@ Include at least 6 API endpoints, 4 database tables, and make all numbers realis
                     <div
                       className={`max-w-[85%] px-3.5 py-2.5 group relative ${
                         msg.role === 'user' ? 'msg-bubble--user' : 'msg-bubble--assistant'
-                      }`}
+                      } ${msg.snapMeta ? 'msg-bubble--snap' : ''}`}
                     >
-                      <MessageContent content={msg.content} variant={msg.role} />
+                      {msg.snapMeta ? (
+                        <SnapMessageCard
+                          meta={msg.snapMeta}
+                          disabled={isLoading || isSnapBusy}
+                          onPreviewImage={url => setLightboxImage(url)}
+                          onRerunAction={(action, editedText) => {
+                            void solveExtractedText(action, editedText);
+                          }}
+                        />
+                      ) : (
+                        <MessageContent content={msg.content} variant={msg.role} />
+                      )}
                       {settings.showTimestamps && (
                         <p style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 4, opacity: 0.6 }}>
                           {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                         </p>
                       )}
-                      {/* ── Pin button — assistant messages only ── */}
                       {msg.role === 'assistant' && msg.id !== 'welcome' && (
-                        <button
-                          type="button"
-                          className={`pin-msg-btn ${isPinned(msg.id) ? 'pin-msg-btn--pinned' : ''}`}
-                          onClick={() => pinMessage(msg.id, msg.content)}
-                          title={isPinned(msg.id) ? 'Remove from saved snippets' : 'Save snippet'}
-                        >
-                          {isPinned(msg.id)
-                            ? <Bookmark className="w-3 h-3" />
-                            : <BookmarkPlus className="w-3 h-3" />}
-                        </button>
+                        <div className="msg-hover-actions">
+                          <button
+                            type="button"
+                            className={`pin-msg-btn ${copiedMsgId === msg.id ? 'pin-msg-btn--pinned' : ''}`}
+                            onClick={() => void copyMessage(msg.id, msg.content)}
+                            title="Copy response"
+                          >
+                            {copiedMsgId === msg.id
+                              ? <Check className="w-3 h-3" />
+                              : <Copy className="w-3 h-3" />}
+                          </button>
+                          <button
+                            type="button"
+                            className={`pin-msg-btn ${isPinned(msg.id) ? 'pin-msg-btn--pinned' : ''}`}
+                            onClick={() => pinMessage(msg.id, msg.content)}
+                            title={isPinned(msg.id) ? 'Remove from saved snippets' : 'Save snippet'}
+                          >
+                            {isPinned(msg.id)
+                              ? <Bookmark className="w-3 h-3" />
+                              : <BookmarkPlus className="w-3 h-3" />}
+                          </button>
+                        </div>
                       )}
                     </div>
                   </motion.div>
                 ))}
 
-                {isLoading && (
+                {snapState && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="snap-hud-card"
+                  >
+                    <div className="snap-hud-top">
+                      <span className="snap-hud-label">
+                        <Loader2 className="w-3.5 h-3.5 animate-spin text-[var(--accent-2)]" />
+                        <span>{getSnapStageText(snapState)}</span>
+                      </span>
+                      <span className="snap-hud-pct">{snapState.progress}%</span>
+                    </div>
+                    <div className="snap-hud-track">
+                      <div
+                        className="snap-hud-fill"
+                        style={{ width: `${Math.max(8, snapState.progress)}%` }}
+                      />
+                    </div>
+                  </motion.div>
+                )}
+
+                {isLoading && !snapState && (
                   <motion.div
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
@@ -1207,8 +1546,7 @@ Include at least 6 API endpoints, 4 database tables, and make all numbers realis
               </div>
             </div>
 
-            {/* ── Smart Follow-ups ─────────────────────────── */}
-            <div className="px-4 border-t border-[var(--panel-border)]" onMouseDown={e => e.stopPropagation()}>
+            <div className="px-4 border-t border-[var(--panel-border)]" onPointerDown={e => e.stopPropagation()}>
               <div className="flex items-center justify-between gap-2 py-2">
                 <div className="flex items-center gap-2 min-w-0">
                   <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--text-muted)]">
@@ -1241,13 +1579,13 @@ Include at least 6 API endpoints, 4 database tables, and make all numbers realis
                     transition={{ duration: 0.22, ease: 'easeInOut' }}
                     className="overflow-hidden pb-2"
                   >
-                    <div className="flex gap-3 mb-3">
+                    <div className="flex gap-3 mb-2">
                       <div className="flex-1 min-w-0 flex flex-col gap-1">
                         {followUps.map((line, i) => (
                           <button
                             key={`${line}-${i}`}
                             type="button"
-                            disabled={isLoading || followUpsLoading}
+                            disabled={isLoading || followUpsLoading || isSnapBusy}
                             onClick={() => void sendMessage(line)}
                             className={`followup-btn ${
                               i === 0
@@ -1266,11 +1604,61 @@ Include at least 6 API endpoints, 4 database tables, and make all numbers realis
               </AnimatePresence>
             </div>
 
-            {/* ── Composer ─────────────────────────────────── */}
+            <div className="snap-strip" onPointerDown={e => e.stopPropagation()}>
+              {SNAP_PRESETS.map(preset => (
+                <button
+                  key={preset.id}
+                  type="button"
+                  disabled={isLoading || isSnapBusy || isRecording}
+                  onClick={() => void triggerScreenSnap(preset.id)}
+                  title={preset.hint}
+                  className={`snap-pill ${preset.id === 'solve' ? 'snap-pill--primary' : ''}`}
+                >
+                  {getSnapPresetIcon(preset.id)}
+                  <span>{preset.shortLabel}</span>
+                </button>
+              ))}
+            </div>
+
+            <AnimatePresence>
+              {IS_ELECTRON && stealthFocus && showTypeHint && (
+                <motion.div
+                  initial={{ opacity: 0, y: 4 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: 4 }}
+                  className="stealth-hint-bar"
+                  onPointerDown={e => e.stopPropagation()}
+                >
+                  <span>Stealth Focus active — no site blur</span>
+                  <button
+                    type="button"
+                    className="stealth-hint-unlock"
+                    onClick={unlockTypingNow}
+                  >
+                    Unlock Typing (⌘⇧K)
+                  </button>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
             <div
-              className="composer-bar px-4 pb-4 pt-3 flex items-center gap-2 border-t border-[var(--panel-border)]"
-              onMouseDown={e => e.stopPropagation()}
+              className="composer-bar px-3.5 pb-3.5 pt-2.5 flex items-center gap-2 border-t border-[var(--panel-border)]"
+              onPointerDown={e => e.stopPropagation()}
             >
+              <IconTooltip
+                label="Snap & Solve Whole Page (⌘⇧S)"
+                hint="Take a full-screen screenshot, extract text with OCR, and solve automatically without losing browser focus."
+                align="start"
+              >
+                <button
+                  type="button"
+                  onClick={() => void triggerScreenSnap('solve')}
+                  disabled={isLoading || isSnapBusy || isRecording}
+                  className={`snap-composer-btn shrink-0 ${isSnapBusy ? 'snap-composer-btn--busy' : ''}`}
+                >
+                  {isSnapBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Camera className="w-4 h-4" />}
+                </button>
+              </IconTooltip>
               <button
                 type="button"
                 onClick={toggleRecording}
@@ -1279,18 +1667,49 @@ Include at least 6 API endpoints, 4 database tables, and make all numbers realis
               >
                 {isRecording ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
               </button>
-              <input
-                ref={inputRef}
-                type="text"
-                value={input}
-                onChange={e => setInput(e.target.value)}
-                onKeyDown={e => {
-                  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void sendMessage(input); }
-                }}
-                placeholder={isRecording ? 'Listening… tap mic to finish' : 'Ask anything — code, design, behavior…'}
-                disabled={isRecording || isLoading}
-                className="input-field flex-1 disabled:opacity-50"
-              />
+              <div className="input-lock-wrap flex-1 min-w-0">
+                <input
+                  ref={inputRef}
+                  type="text"
+                  value={input}
+                  readOnly={IS_ELECTRON && stealthFocus}
+                  onMouseDown={e => {
+                    if (IS_ELECTRON && stealthFocus) {
+                      e.preventDefault();
+                      triggerTypeHint();
+                    }
+                  }}
+                  onChange={e => setInput(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      void sendMessage(input);
+                    } else if (e.key === 'Escape' && IS_ELECTRON && !stealthFocus) {
+                      e.preventDefault();
+                      void setElectronFocusLock(true);
+                    }
+                  }}
+                  placeholder={
+                    isRecording
+                      ? 'Listening… tap mic to finish'
+                      : IS_ELECTRON && stealthFocus
+                        ? 'Snap screen or unlock to type (⌘⇧K)…'
+                        : 'Ask anything — code, design, behavior…'
+                  }
+                  disabled={isRecording || isLoading}
+                  className={`input-field ${IS_ELECTRON ? 'input-field--with-lock' : ''} disabled:opacity-50`}
+                />
+                {IS_ELECTRON && (
+                  <button
+                    type="button"
+                    onClick={toggleStealthFocus}
+                    title={stealthFocus ? 'Unlock keyboard typing (⌘⇧K)' : 'Lock Stealth Focus (⌘⇧K)'}
+                    className={`input-lock-btn ${stealthFocus ? 'input-lock-btn--locked' : 'input-lock-btn--unlocked'}`}
+                  >
+                    {stealthFocus ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
+                  </button>
+                )}
+              </div>
               <button
                 type="button"
                 onClick={() => void sendMessage(input)}
@@ -1303,14 +1722,12 @@ Include at least 6 API endpoints, 4 database tables, and make all numbers realis
             </div>
           </div>
 
-          {/* ── Resize handles ────────────────────────────── */}
-          <div className="resize-handle resize-handle--w" onMouseDown={e => void onResizeStart('w', e)} aria-hidden />
-          <div className="resize-handle resize-handle--e" onMouseDown={e => void onResizeStart('e', e)} aria-hidden />
-          <div className="resize-handle resize-handle--s" onMouseDown={e => void onResizeStart('s', e)} aria-hidden />
-          <div className="resize-handle resize-handle--se" onMouseDown={e => void onResizeStart('se', e)} aria-hidden />
+          <div className="resize-handle resize-handle--w" onPointerDown={e => void onResizeStart('w', e)} aria-hidden />
+          <div className="resize-handle resize-handle--e" onPointerDown={e => void onResizeStart('e', e)} aria-hidden />
+          <div className="resize-handle resize-handle--s" onPointerDown={e => void onResizeStart('s', e)} aria-hidden />
+          <div className="resize-handle resize-handle--se" onPointerDown={e => void onResizeStart('se', e)} aria-hidden />
         </div>
 
-        {/* ── Settings Panel ────────────────────────────── */}
         <SettingsPanel
           open={isSettingsOpen}
           settings={settings}
@@ -1321,16 +1738,16 @@ Include at least 6 API endpoints, 4 database tables, and make all numbers realis
           onReset={handleSettingsReset}
         />
 
-        {/* ── System Design Whiteboard ───────────────────── */}
         <SystemDesignWhiteboard
           open={isWhiteboardOpen}
           loading={whiteboardLoading}
           data={whiteboardData}
+          stealthFocus={IS_ELECTRON && stealthFocus}
+          onUnlockTyping={unlockTypingNow}
           onClose={() => setIsWhiteboardOpen(false)}
           onDesign={generateSystemDesign}
         />
 
-        {/* ── Timer Popup ───────────────────────────────── */}
         <AnimatePresence>
           {showTimerPopup && (
             <motion.div
@@ -1339,7 +1756,7 @@ Include at least 6 API endpoints, 4 database tables, and make all numbers realis
               exit={{ opacity: 0, scale: 0.93, y: -6 }}
               transition={{ duration: 0.15, ease: 'easeOut' }}
               className="timer-popup"
-              onMouseDown={e => e.stopPropagation()}
+              onPointerDown={e => e.stopPropagation()}
             >
               <p className="timer-popup-label">Timer Mode</p>
               <div className="timer-mode-row">
@@ -1390,7 +1807,6 @@ Include at least 6 API endpoints, 4 database tables, and make all numbers realis
           )}
         </AnimatePresence>
 
-        {/* ── Pins Panel ────────────────────────────────── */}
         <AnimatePresence>
           {isPinsOpen && (
             <motion.div
@@ -1399,9 +1815,8 @@ Include at least 6 API endpoints, 4 database tables, and make all numbers realis
               exit={{ opacity: 0, scale: 0.96, y: -8 }}
               transition={{ duration: 0.18, ease: 'easeOut' }}
               className="pins-panel"
-              onMouseDown={e => e.stopPropagation()}
+              onPointerDown={e => e.stopPropagation()}
             >
-              {/* Header */}
               <div className="pins-header">
                 <div className="pins-title">
                   <div className="pins-title-icon">
@@ -1422,7 +1837,6 @@ Include at least 6 API endpoints, 4 database tables, and make all numbers realis
                 </button>
               </div>
 
-              {/* Body */}
               <div className="pins-body">
                 {pinnedMessages.length === 0 ? (
                   <div className="pins-empty">
@@ -1476,6 +1890,31 @@ Include at least 6 API endpoints, 4 database tables, and make all numbers realis
                     })}
                   </div>
                 )}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        <AnimatePresence>
+          {lightboxImage && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="snap-lightbox"
+              onPointerDown={e => e.stopPropagation()}
+              onClick={() => setLightboxImage(null)}
+            >
+              <div className="snap-lightbox-inner" onClick={e => e.stopPropagation()}>
+                <button
+                  type="button"
+                  className="snap-lightbox-close"
+                  onClick={() => setLightboxImage(null)}
+                  title="Close preview"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+                <img src={lightboxImage} alt="Full page capture preview" className="snap-lightbox-img" />
               </div>
             </motion.div>
           )}
